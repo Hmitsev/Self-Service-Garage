@@ -395,13 +395,56 @@ def new_reservation(user_id):
             valid_parts = False
         parts_comment = st.text_area("Какви части желаете? *")
         vin = st.text_input("Номер на рама (VIN) *", max_chars=17).upper().strip()
-        doc_camera = st.camera_input("Снимай талона")
-        doc_upload = st.file_uploader(
-            "или качи талона",
-            type=["jpg", "jpeg", "png", "pdf"],
+        add_registration_doc = st.checkbox(
+            "📷 Добави снимка на талона"
         )
-        if doc_camera or doc_upload:
-            doc_path = save_upload(doc_camera or doc_upload, DOC_DIR, "talon")
+        
+        doc_camera = None
+        doc_upload = None
+        doc_path = None
+        
+        if add_registration_doc:
+        
+            st.info(
+                "Снимайте талона хоризонтално, "
+                "така че полето (E) с VIN да се вижда ясно."
+            )
+        
+            document_source = st.radio(
+                "Как желаете да добавите талона?",
+                ["Снимай с камера", "Качи готов файл"],
+                horizontal=True,
+                key="registration_document_source",
+            )
+        
+            if document_source == "Снимай с камера":
+        
+                doc_camera = st.camera_input(
+                    "Снимай талона",
+                    key="registration_doc_camera",
+                )
+        
+            else:
+        
+                doc_upload = st.file_uploader(
+                    "Качи снимка или PDF на талона",
+                    type=["jpg", "jpeg", "png", "pdf"],
+                    key="registration_doc_upload",
+                )
+        
+            document_file = doc_camera or doc_upload
+        
+            if document_file:
+        
+                doc_path = save_upload(
+                    document_file,
+                    DOC_DIR,
+                    "talon",
+                )
+        
+                st.success(
+                    "Талонът е приложен успешно."
+                )
 
     if st.button(
         "Потвърди и изпрати заявката",
