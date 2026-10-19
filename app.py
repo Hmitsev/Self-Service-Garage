@@ -359,7 +359,7 @@ def client_panel():
     c1, c2, c3 = st.columns([1, 2, 1])
 
     with c2:
-        st.write("")
+        st.image(APP_DIR / "Designer (27).jpg")
 
     st.markdown(
         f"<p style='text-align:center;color:white;'>Здравей, {user['first_name']}.</p>",
@@ -440,7 +440,7 @@ def admin_panel():
     c1, c2, c3 = st.columns([1, 2, 1])
 
     with c2:
-        st.image(APP_DIR / "Designer (27).png")
+        st.image(APP_DIR / "Designer (27).jpg")
 
     st.markdown(
         "<p style='text-align:center;color:white;'>Административен панел</p>",
@@ -500,7 +500,7 @@ if "role" not in st.session_state:
     c1, c2, c3 = st.columns([1, 2, 1])
 
     with c2:
-        st.image(APP_DIR / "Designer (27).png")
+        st.image(APP_DIR / "Designer (27).jpg")
 
     st.markdown(
         "<p style='text-align:center;color:white;font-size:18px;'>"
