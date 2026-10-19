@@ -122,21 +122,21 @@ def save_upload(uploaded, folder, prefix):
     target = folder / f"{prefix}_{uuid.uuid4().hex}{suffix}"
     target.write_bytes(uploaded.getbuffer())
     return str(target)
-    @st.cache_data
-    def get_bg_css(background_file):
-    
-        if not background_file.exists():
-            return ""
-    
-        encoded = base64.b64encode(
-            background_file.read_bytes()
-        ).decode()
-    
-        return (
-            "background-image:"
-            "linear-gradient(rgba(15,0,0,.86),rgba(15,0,0,.90)),"
-            f"url(data:image/png;base64,{encoded});"
-        )
+@st.cache_data
+def get_bg_css(background_file):
+
+    if not background_file.exists():
+        return ""
+
+    encoded = base64.b64encode(
+        background_file.read_bytes()
+    ).decode()
+
+    return (
+        "background-image:"
+        "linear-gradient(rgba(15,0,0,.86),rgba(15,0,0,.90)),"
+        f"url(data:image/png;base64,{encoded});"
+    )
 
 
 def apply_style():
