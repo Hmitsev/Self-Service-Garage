@@ -251,21 +251,66 @@ def register_view():
             st.session_state.user_id = row["id"]; st.session_state.role = "client"; st.rerun()
 
 def login_view():
+
     st.subheader("Вход")
-    tab_client, tab_admin = st.tabs(["Клиент", "Администратор"])
+
+    tab_client, tab_admin = st.tabs(
+        ["Клиент", "Администратор"]
+    )
+
     with tab_client:
-        phone = st.text_input("Телефон", key="login_phone")
-        password = st.text_input("Парола", type="password", key="login_pass")
-        if st.button("Вход като клиент", use_container_width=True):
+
+        with st.form("client_login_form"):
+
+            phone = st.text_input(
+                "Телефон",
+                key="login_phone"
+            )
+
+            password = st.text_input(
+                "Парола",
+                type="password",
+                key="login_pass"
+            )
+
+            login_pressed = st.form_submit_button(
+                "Вход като клиент",
+                use_container_width=True,
+            )
+
+        if login_pressed:
+
             user = user_by_phone(phone)
+
             if user and user["password_hash"] == hash_value(password):
-                st.session_state.user_id = user["id"]; st.session_state.role = "client"; st.rerun()
+
+                st.session_state.user_id = user["id"]
+                st.session_state.role = "client"
+                st.rerun()
+
             st.error("Невалиден телефон или парола.")
+
     with tab_admin:
-        pin = st.text_input("Администраторски PIN", type="password")
-        if st.button("Вход в админ панела", use_container_width=True):
+
+        with st.form("admin_login_form"):
+
+            pin = st.text_input(
+                "Администраторски PIN",
+                type="password",
+            )
+
+            admin_login_pressed = st.form_submit_button(
+                "Вход в админ панела",
+                use_container_width=True,
+            )
+
+        if admin_login_pressed:
+
             if hash_value(pin) == setting("admin_pin_hash"):
-                st.session_state.role = "admin"; st.rerun()
+
+                st.session_state.role = "admin"
+                st.rerun()
+
             st.error("Невалиден администраторски PIN.")
 
 def video_section():
