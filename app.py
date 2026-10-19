@@ -11,6 +11,7 @@ from psycopg2 import IntegrityError
 from psycopg2.extras import RealDictCursor
 from psycopg2.pool import ThreadedConnectionPool
 import streamlit as st
+import time
 
 APP_DIR = Path(__file__).parent
 DATA_DIR = APP_DIR / "data"
@@ -167,6 +168,12 @@ def apply_style():
         border-color:#ff8585;
         background:linear-gradient(135deg,#970000,#ef2424 55%,#a00000);
         color:white; transform:translateY(-1px);
+    }}
+    div[data-testid="stHorizontalBlock"] .stButton > button[kind="primary"] {{
+        border-color:#43e47c;
+        background:linear-gradient(135deg,#086b30,#16a34a 55%,#08732f);
+        color:white;
+        box-shadow:0 8px 22px rgba(22,163,74,.38);
     }}
     </style>""", unsafe_allow_html=True)
 
@@ -347,7 +354,11 @@ def history(user_id):
                         execute("""UPDATE reservations SET customer_parts_decision=%s,customer_parts_comment=%s,
                                    customer_parts_responded_at=NOW(),parts_status=%s WHERE id=%s AND user_id=%s""",
                                 (decision,comment.strip() or None,ps,r["id"],user_id))
-                        st.success("Отговорът е изпратен."); st.rerun()
+                        if decision == "Искам":
+                            st.session_state.client_flash = f"Потвърдено: приехте предложението за части. Избран вариант: {comment.strip()}"
+                        else:
+                            st.session_state.client_flash = "Потвърдено: отказахте предложението за части."
+                        st.rerun()
 
 def technical_issue(user_id):
     st.subheader("Технически проблем")
@@ -363,10 +374,7 @@ def technical_issue(user_id):
             st.success("Сигналът е изпратен.")
 
 def client_panel():
-    user = fetchone(
-        "SELECT * FROM users WHERE id=%s",
-        (st.session_state.user_id,)
-    )
+    user = fetchone("SELECT * FROM users WHERE id=%s", (st.session_state.user_id,))
 
     if "client_page" not in st.session_state:
         st.session_state.client_page = "Начало"
@@ -386,12 +394,16 @@ def client_panel():
         ("📅 Запази час", "Запази час"),
         ("🧾 Моите резервации", "Моите резервации"),
         ("🛠 Технически проблем", "Технически проблем"),
-        ("👤 Моят профил", "Моят профил"),
     ]
-    nav_columns = st.columns(5)
+    nav_columns = st.columns(4)
     for column, (label, page_name) in zip(nav_columns, nav_items):
         with column:
-            if st.button(label, key=f"client_nav_{page_name}", use_container_width=True):
+            if st.button(
+                label,
+                key=f"client_nav_{page_name}",
+                use_container_width=True,
+                type="primary" if st.session_state.client_page == page_name else "secondary",
+            ):
                 st.session_state.client_page = page_name
                 st.rerun()
 
@@ -400,9 +412,15 @@ def client_panel():
         if st.button("🏠 Начало", key="sidebar_home", use_container_width=True):
             st.session_state.client_page = "Начало"
             st.rerun()
+        if st.button("👤 Моят профил", key="sidebar_profile", use_container_width=True):
+            st.session_state.client_page = "Моят профил"
+            st.rerun()
         if st.button("Изход", use_container_width=True):
             st.session_state.clear()
             st.rerun()
+
+    if st.session_state.get("client_flash"):
+        st.success(st.session_state.pop("client_flash"))
 
     page = st.session_state.client_page
     st.markdown("---")
@@ -424,7 +442,10 @@ def admin_reservations():
     st.subheader("Мониторинг на резервациите")
     statuses=["Очаква потвърждение","Потвърдена","Отказана","Завършена"]
     selected=st.multiselect("Статус",statuses,default=statuses[:2])
-    rows=fetchall("""SELECT r.*,u.first_name,u.last_name,u.phone FROM reservations r JOIN users u ON u.id=r.user_id ORDER BY r.reservation_date,r.start_time""")
+    rows=fetchall("""SELECT r.*,u.first_name,u.last_name,u.phone FROM reservations r
+                     JOIN users u ON u.id=r.user_id
+                     WHERE r.status NOT IN ('Завършена','Отказана')
+                     ORDER BY r.reservation_date,r.start_time""")
     rows=[r for r in rows if not selected or r["status"] in selected]
     part_statuses=["—","Очаква преглед","Можем да подготвим","Не можем да подготвим","Клиентът потвърди","Клиентът отказа","Подготвени"]
     for r in rows:
@@ -448,7 +469,11 @@ def admin_reservations():
                 else:
                     execute("UPDATE reservations SET status=%s,parts_status=%s,parts_offer=%s,admin_note=%s,door_pin=%s WHERE id=%s",
                             (ns,None if ps=="—" else ps,offer.strip() or None,note.strip() or None,pin.strip() or None,r["id"]))
-                    st.success("Промените са запазени."); st.rerun()
+                    st.session_state.admin_flash = (
+                        f"Потвърдено: резервация #{r['id']} е обновена. "
+                        f"Статус: {ns}. Статус части: {ps}."
+                    )
+                    st.rerun()
 
 
 def admin_archive():
@@ -460,6 +485,19 @@ def admin_archive():
     for r in rows:
         with st.expander(f"{r['status']} • {r['reservation_date']} {r['start_time'].strftime('%H:%M')} • {r['first_name']} {r['last_name']}"):
             st.write("**Телефон:**",r["phone"]); st.write("**Оферта:**",r.get("parts_offer") or "—"); st.write("**Решение:**",r.get("customer_parts_decision") or "—"); st.write("**Коментар:**",r.get("customer_parts_comment") or "—")
+
+
+    st.markdown("### Решени технически сигнали")
+    solved_issues = fetchall("""SELECT t.*,u.first_name,u.last_name FROM technical_issues t
+                              JOIN users u ON u.id=t.user_id
+                              WHERE t.status='Решено'
+                              ORDER BY t.id DESC""")
+    if not solved_issues:
+        st.info("Няма решени технически сигнали.")
+    for issue in solved_issues:
+        with st.expander(f"Решено • #{issue['id']} • {issue['category']} • {issue['first_name']} {issue['last_name']}"):
+            st.write(issue["description"])
+            st.caption(f"Създадено: {issue['created_at'].strftime('%d.%m.%Y %H:%M')}")
 
 
 def admin_statistics():
@@ -475,55 +513,107 @@ def admin_statistics():
     if daily: st.line_chart({r["reservation_date"].isoformat():int(r["total"]) for r in daily})
 
 def admin_panel():
+    # Browser timer triggers a rerun every 240000 ms (4 minutes).
+    st.components.v1.html(
+        """
+        <script>
+        setTimeout(function() {
+            window.parent.location.reload();
+        }, 240000);
+        </script>
+        """,
+        height=0,
+    )
 
     st.markdown('<div class="hero">', unsafe_allow_html=True)
-
     c1, c2, c3 = st.columns([1, 2, 1])
-
     with c2:
         st.image(APP_DIR / "Designer (27).jpg")
-
     st.markdown(
         "<p style='text-align:center;color:white;'>Административен панел</p>",
         unsafe_allow_html=True,
     )
-
     st.markdown("</div>", unsafe_allow_html=True)
+
     with st.sidebar:
-        page = st.radio("Админ меню", ["Табло", "Резервации", "Архив", "Статистика", "Технически сигнали", "Видео съдържание", "Настройки"])
-        if st.button("Изход"): st.session_state.clear(); st.rerun()
+        page = st.radio(
+            "Админ меню",
+            ["Табло", "Резервации", "Архив", "Статистика", "Технически сигнали", "Видео съдържание", "Настройки"],
+        )
+        st.caption("🔄 Автоматично обновяване на всеки 4 минути")
+        if st.button("Изход"):
+            st.session_state.clear()
+            st.rerun()
+
+    if st.session_state.get("admin_flash"):
+        st.success(st.session_state.pop("admin_flash"))
+
     if page == "Табло":
         pending = fetchone("SELECT COUNT(*) AS c FROM reservations WHERE status='Очаква потвърждение'")["c"]
-        parts = fetchone("SELECT COUNT(*) AS c FROM reservations WHERE wants_parts=TRUE AND parts_status='Очаква преглед'")["c"]
+        parts = fetchone("""SELECT COUNT(*) AS c FROM reservations
+                          WHERE wants_parts=TRUE
+                            AND status NOT IN ('Завършена','Отказана')
+                            AND parts_status IN ('Очаква преглед','Можем да подготвим','Клиентът потвърди')""")["c"]
         issues = fetchone("SELECT COUNT(*) AS c FROM technical_issues WHERE status='Ново'")["c"]
         users = fetchone("SELECT COUNT(*) AS c FROM users")["c"]
-        for col,label,value in zip(st.columns(4), ["Чакащи резервации","Заявки за части","Нови сигнали","Клиенти"], [pending,parts,issues,users]): col.metric(label,value)
-    elif page == "Резервации": admin_reservations()
-    elif page == "Архив": admin_archive()
-    elif page == "Статистика": admin_statistics()
+        for col,label,value in zip(
+            st.columns(4),
+            ["Чакащи резервации","Заявки за части","Нови сигнали","Клиенти"],
+            [pending,parts,issues,users],
+        ):
+            col.metric(label,value)
+    elif page == "Резервации":
+        admin_reservations()
+    elif page == "Архив":
+        admin_archive()
+    elif page == "Статистика":
+        admin_statistics()
     elif page == "Технически сигнали":
-        rows = fetchall("""SELECT t.*,u.first_name,u.last_name FROM technical_issues t JOIN users u ON u.id=t.user_id ORDER BY t.id DESC""")
+        rows = fetchall("""SELECT t.*,u.first_name,u.last_name FROM technical_issues t
+                         JOIN users u ON u.id=t.user_id
+                         WHERE t.status<>'Решено'
+                         ORDER BY t.id DESC""")
+        if not rows:
+            st.info("Няма активни технически сигнали.")
         for r in rows:
             with st.expander(f"#{r['id']} • {r['category']} • {r['first_name']} {r['last_name']} • {r['status']}"):
                 st.write(r["description"])
-                new = st.selectbox("Статус", ["Ново", "В работа", "Решено"], index=["Ново", "В работа", "Решено"].index(r["status"]), key=f"is_{r['id']}")
-                if st.button("Обнови", key=f"iu_{r['id']}"): execute("UPDATE technical_issues SET status=%s WHERE id=%s", (new,r["id"])); st.rerun()
+                status_options = ["Ново", "В работа", "Решено"]
+                new = st.selectbox(
+                    "Статус",
+                    status_options,
+                    index=status_options.index(r["status"]),
+                    key=f"is_{r['id']}",
+                )
+                if st.button("Обнови", key=f"iu_{r['id']}"):
+                    execute("UPDATE technical_issues SET status=%s WHERE id=%s", (new,r["id"]))
+                    if new == "Решено":
+                        st.session_state.admin_flash = f"Потвърдено: сигнал #{r['id']} е решен и преместен в Архив."
+                    else:
+                        st.session_state.admin_flash = f"Потвърдено: сигнал #{r['id']} е със статус „{new}“."
+                    st.rerun()
     elif page == "Видео съдържание":
         with st.form("videos"):
             urls = [st.text_input(f"Видео {i}", value=setting(f"youtube_{i}")) for i in range(1,4)]
             if st.form_submit_button("Запази видеата", use_container_width=True):
-                for i,url in enumerate(urls,1): set_setting(f"youtube_{i}",url.strip())
-                st.success("Видеата са обновени.")
+                for i,url in enumerate(urls,1):
+                    set_setting(f"youtube_{i}",url.strip())
+                st.success("Потвърдено: видеата са обновени.")
     else:
         with st.form("settings_form"):
-            opening = st.text_input("Отваряне", value=setting("open_hour")); closing = st.text_input("Затваряне", value=setting("close_hour"))
+            opening = st.text_input("Отваряне", value=setting("open_hour"))
+            closing = st.text_input("Затваряне", value=setting("close_hour"))
             duration = st.number_input("Слот (минути)", 30, 240, int(setting("slot_minutes")), 30)
             new_pin = st.text_input("Нов администраторски PIN", type="password")
             if st.form_submit_button("Запази настройки"):
-                datetime.strptime(opening,"%H:%M"); datetime.strptime(closing,"%H:%M")
-                set_setting("open_hour",opening); set_setting("close_hour",closing); set_setting("slot_minutes",duration)
-                if new_pin: set_setting("admin_pin_hash",hash_value(new_pin))
-                st.success("Настройките са запазени.")
+                datetime.strptime(opening,"%H:%M")
+                datetime.strptime(closing,"%H:%M")
+                set_setting("open_hour",opening)
+                set_setting("close_hour",closing)
+                set_setting("slot_minutes",duration)
+                if new_pin:
+                    set_setting("admin_pin_hash",hash_value(new_pin))
+                st.success("Потвърдено: настройките са запазени.")
 
 try:
     init_db()
