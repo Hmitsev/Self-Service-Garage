@@ -11,6 +11,8 @@ from psycopg2 import IntegrityError
 from psycopg2.extras import RealDictCursor
 from psycopg2.pool import ThreadedConnectionPool
 import streamlit as st
+import time
+
 
 APP_DIR = Path(__file__).parent
 DATA_DIR = APP_DIR / "data"
@@ -473,12 +475,34 @@ def admin_statistics():
     for col,label,key in zip(cols,["Общо","Потвърдени","Завършени","Отказани","С части","Приети оферти"],["total","confirmed","completed","cancelled","parts","accepted"]): col.metric(label,int(q[key] or 0))
     daily=fetchall("SELECT reservation_date,COUNT(*) total FROM reservations WHERE reservation_date BETWEEN %s AND %s GROUP BY reservation_date ORDER BY reservation_date",(d1,d2))
     if daily: st.line_chart({r["reservation_date"].isoformat():int(r["total"]) for r in daily})
+        
+def admin_auto_refresh():
 
+    if "role" not in st.session_state:
+        return
+
+    if st.session_state.get("role") != "admin":
+        return
+
+    if "last_refresh" not in st.session_state:
+        st.session_state.last_refresh = time.time()
+
+    now = time.time()
+
+    if now - st.session_state.last_refresh > 240:   # 4 минути
+
+        st.session_state.last_refresh = now
+        st.rerun()
 def admin_panel():
 
     st.markdown('<div class="hero">', unsafe_allow_html=True)
 
     c1, c2, c3 = st.columns([1, 2, 1])
+def admin_panel():
+
+    admin_auto_refresh()
+
+    st.markdown(
 
     with c2:
         st.image(APP_DIR / "Designer (27).jpg")
