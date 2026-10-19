@@ -440,10 +440,35 @@ except Exception as exc:
     st.stop()
 
 apply_style()
+
 if "role" not in st.session_state:
-    st.markdown('<div class="hero"><h1>Сервиз за самообслужване</h1><p>Резервация, безопасност, части и достъп в едно приложение.</p></div>', unsafe_allow_html=True)
+
+    st.markdown('<div class="hero">', unsafe_allow_html=True)
+
+    c1, c2, c3 = st.columns([1, 2, 1])
+
+    with c2:
+        st.image("Designer (27).png", width=450)
+
+    st.markdown(
+        "<p style='text-align:center;color:white;font-size:18px;'>"
+        "Резервация • Части • Достъп • Самообслужване"
+        "</p>",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
     tab1, tab2 = st.tabs(["Създай профил", "Вход"])
-    with tab1: register_view()
-    with tab2: login_view()
-elif st.session_state.role == "client": client_panel()
-else: admin_panel()
+
+    with tab1:
+        register_view()
+
+    with tab2:
+        login_view()
+
+elif st.session_state.role == "client":
+    client_panel()
+
+else:
+    admin_panel()
