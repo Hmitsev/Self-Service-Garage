@@ -168,18 +168,28 @@ def register_view():
         phone = c1.text_input("Телефон *"); email = c2.text_input("Имейл")
         password = c1.text_input("Парола *", type="password")
         password2 = c2.text_input("Повтори паролата *", type="password")
-        camera = st.camera_input("Направи профилна снимка на място")
-        upload = st.file_uploader("или качи снимка", type=["jpg", "jpeg", "png"])
         submitted = st.form_submit_button("Създай профил", use_container_width=True)
     if submitted:
         if not all([first.strip(), last.strip(), phone.strip(), password]): st.error("Попълни всички задължителни полета.")
         elif password != password2: st.error("Паролите не съвпадат.")
         elif user_by_phone(phone): st.error("Вече има профил с този телефон.")
         else:
-            photo = save_upload(camera or upload, PROFILE_DIR, "profile")
-            row = execute("""INSERT INTO users(first_name,last_name,phone,email,password_hash,profile_photo)
-                           VALUES(%s,%s,%s,%s,%s,%s) RETURNING id""",
-                          (first.strip(), last.strip(), phone.strip(), email.strip(), hash_value(password), photo), True)
+            row = execute("""
+            INSERT INTO users(
+                first_name,last_name,phone,email,
+                password_hash,profile_photo
+            )
+            VALUES(%s,%s,%s,%s,%s,%s)
+            RETURNING id
+            """,
+            (
+                first.strip(),
+                last.strip(),
+                phone.strip(),
+                email.strip(),
+                hash_value(password),
+                None
+            ), True)
             st.session_state.user_id = row["id"]; st.session_state.role = "client"; st.rerun()
 
 def login_view():
@@ -347,8 +357,7 @@ def client_panel():
     with st.sidebar:
         st.write(user["profile_photo"])
 
-        if user["profile_photo"]:
-            st.image(user["profile_photo"], width=110)
+        st.image("Designer (27).png", width=110)
         st.write(f"**{user['first_name']} {user['last_name']}**")
         page = st.radio("Меню", ["Начало", "Запази час", "Моите резервации", "Технически проблем", "Моят профил"])
         if st.button("Изход"): st.session_state.clear(); st.rerun()
