@@ -122,13 +122,26 @@ def save_upload(uploaded, folder, prefix):
     target = folder / f"{prefix}_{uuid.uuid4().hex}{suffix}"
     target.write_bytes(uploaded.getbuffer())
     return str(target)
+    @st.cache_data
+    def get_bg_css(background_file):
+    
+        if not background_file.exists():
+            return ""
+    
+        encoded = base64.b64encode(
+            background_file.read_bytes()
+        ).decode()
+    
+        return (
+            "background-image:"
+            "linear-gradient(rgba(15,0,0,.86),rgba(15,0,0,.90)),"
+            f"url(data:image/png;base64,{encoded});"
+        )
+
 
 def apply_style():
     background_file = ADMIN_BG if st.session_state.get("role") == "admin" else CLIENT_BG
-    bg_css = ""
-    if background_file.exists():
-        encoded = base64.b64encode(background_file.read_bytes()).decode()
-        bg_css = f"background-image:linear-gradient(rgba(15,0,0,.86),rgba(15,0,0,.90)),url(data:image/png;base64,{encoded});"
+    bg_css = get_bg_css(background_file)
     st.markdown(f"""
     <style>
     .stApp {{{bg_css} background-size:cover;background-position:center;background-attachment:fixed;}}
@@ -356,7 +369,6 @@ def client_panel():
     st.markdown("</div>", unsafe_allow_html=True)
     with st.sidebar:
 
-        st.image(APP_DIR / "Designer (27).png")
         st.write(f"**{user['first_name']} {user['last_name']}**")
         page = st.radio("Меню", ["Начало", "Запази час", "Моите резервации", "Технически проблем", "Моят профил"])
         if st.button("Изход"): st.session_state.clear(); st.rerun()
