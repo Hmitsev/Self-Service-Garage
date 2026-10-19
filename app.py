@@ -140,7 +140,8 @@ def get_bg_css(background_file):
 
 
 def apply_style():
-    bg_css = ""
+    background_file = ADMIN_BG if st.session_state.get("role") == "admin" else CLIENT_BG
+    bg_css = get_bg_css(background_file)
     st.markdown(f"""
     <style>
     .stApp {{{bg_css} background-size:cover;background-position:center;background-attachment:fixed;}}
@@ -358,7 +359,7 @@ def client_panel():
     c1, c2, c3 = st.columns([1, 2, 1])
 
     with c2:
-        st.image(APP_DIR / "Designer (27).png")
+        st.write("")
 
     st.markdown(
         f"<p style='text-align:center;color:white;'>Здравей, {user['first_name']}.</p>",
