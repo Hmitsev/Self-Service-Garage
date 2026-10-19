@@ -346,7 +346,7 @@ def client_panel():
     c1, c2, c3 = st.columns([1, 2, 1])
 
     with c2:
-        st.image("Designer (27).png")
+        st.image(APP_DIR / "Designer (27).png")
 
     st.markdown(
         f"<p style='text-align:center;color:white;'>Здравей, {user['first_name']}.</p>",
@@ -356,7 +356,7 @@ def client_panel():
     st.markdown("</div>", unsafe_allow_html=True)
     with st.sidebar:
 
-        st.image("Designer (27).png")
+        st.image(APP_DIR / "Designer (27).png")
         st.write(f"**{user['first_name']} {user['last_name']}**")
         page = st.radio("Меню", ["Начало", "Запази час", "Моите резервации", "Технически проблем", "Моят профил"])
         if st.button("Изход"): st.session_state.clear(); st.rerun()
@@ -428,7 +428,7 @@ def admin_panel():
     c1, c2, c3 = st.columns([1, 2, 1])
 
     with c2:
-        st.image("Designer (27).png")
+        st.image(APP_DIR / "Designer (27).png")
 
     st.markdown(
         "<p style='text-align:center;color:white;'>Административен панел</p>",
@@ -488,7 +488,7 @@ if "role" not in st.session_state:
     c1, c2, c3 = st.columns([1, 2, 1])
 
     with c2:
-        st.image("Designer (27).png")
+        st.image(APP_DIR / "Designer (27).png")
 
     st.markdown(
         "<p style='text-align:center;color:white;font-size:18px;'>"
