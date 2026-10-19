@@ -343,10 +343,98 @@ def admin_reservations():
                             (new_status, None if parts_status=="—" else parts_status, note, door_pin, r["id"]))
                     st.rerun()
 
+def admin_archive():
+    st.subheader("Архив на резервациите")
+    c1, c2, c3 = st.columns(3)
+    date_from = c1.date_input("От дата", date.today() - timedelta(days=90), key="archive_from")
+    date_to = c2.date_input("До дата", date.today(), key="archive_to")
+    selected_statuses = c3.multiselect("Статус", ["Завършена", "Отказана"], default=["Завършена", "Отказана"])
+    c4, c5 = st.columns(2)
+    search = c4.text_input("Име, телефон или VIN").strip().lower()
+    parts_filter = c5.selectbox("Части", ["Всички", "С части", "Без части"])
+    if date_from > date_to:
+        st.error("Началната дата не може да бъде след крайната.")
+        return
+    rows = fetchall("""SELECT r.*,u.first_name,u.last_name,u.phone,u.email FROM reservations r
+                     JOIN users u ON u.id=r.user_id
+                     WHERE r.reservation_date BETWEEN %s AND %s AND r.status=ANY(%s)
+                     ORDER BY r.reservation_date DESC,r.start_time DESC""",
+                    (date_from, date_to, selected_statuses or ["Завършена", "Отказана"]))
+    filtered=[]
+    for r in rows:
+        if parts_filter == "С части" and not r["wants_parts"]: continue
+        if parts_filter == "Без части" and r["wants_parts"]: continue
+        text=f"{r['first_name']} {r['last_name']} {r['phone']} {r['vin'] or ''}".lower()
+        if search and search not in text: continue
+        filtered.append(r)
+    m=st.columns(3)
+    m[0].metric("Архивирани", len(filtered))
+    m[1].metric("Завършени", sum(r["status"]=="Завършена" for r in filtered))
+    m[2].metric("Отказани", sum(r["status"]=="Отказана" for r in filtered))
+    if not filtered:
+        st.info("Няма записи за избраните филтри.")
+    for r in filtered:
+        day=r["reservation_date"].isoformat(); hour=r["start_time"].strftime("%H:%M")
+        icon="✅" if r["status"]=="Завършена" else "❌"
+        with st.expander(f"{icon} #{r['id']} • {day} {hour} • {r['first_name']} {r['last_name']}"):
+            a,b=st.columns(2)
+            a.write(f"**Статус:** {r['status']}"); a.write(f"**Телефон:** {r['phone']}"); a.write(f"**Имейл:** {r['email'] or '—'}")
+            a.write("**Части:**", "Да" if r["wants_parts"] else "Не")
+            b.write(f"**VIN:** {r['vin'] or '—'}"); b.write(f"**Статус части:** {r['parts_status'] or '—'}")
+            b.write(f"**PIN:** {r['door_pin'] or '—'}"); b.write(f"**Бележка:** {r['admin_note'] or '—'}")
+
+
+def admin_statistics():
+    st.subheader("Статистика")
+    c1,c2=st.columns(2)
+    date_from=c1.date_input("Период от", date.today()-timedelta(days=30), key="stats_from")
+    date_to=c2.date_input("Период до", date.today(), key="stats_to")
+    if date_from > date_to:
+        st.error("Началната дата не може да бъде след крайната.")
+        return
+    q=fetchone("""SELECT COUNT(*) total,
+        COUNT(*) FILTER(WHERE status='Очаква потвърждение') pending,
+        COUNT(*) FILTER(WHERE status='Потвърдена') confirmed,
+        COUNT(*) FILTER(WHERE status='Завършена') completed,
+        COUNT(*) FILTER(WHERE status='Отказана') cancelled,
+        COUNT(*) FILTER(WHERE wants_parts=TRUE) parts,
+        COUNT(DISTINCT user_id) customers
+        FROM reservations WHERE reservation_date BETWEEN %s AND %s""", (date_from,date_to))
+    total=int(q["total"] or 0); completed=int(q["completed"] or 0); cancelled=int(q["cancelled"] or 0)
+    r1=st.columns(4); r1[0].metric("Общо",total); r1[1].metric("Чакащи",int(q["pending"] or 0)); r1[2].metric("Потвърдени",int(q["confirmed"] or 0)); r1[3].metric("Завършени",completed)
+    r2=st.columns(4); r2[0].metric("Отказани",cancelled); r2[1].metric("Заявки за части",int(q["parts"] or 0)); r2[2].metric("Уникални клиенти",int(q["customers"] or 0)); r2[3].metric("Завършени %",f"{round(completed/total*100,1) if total else 0}%")
+    daily=fetchall("""SELECT reservation_date,COUNT(*) total FROM reservations
+                    WHERE reservation_date BETWEEN %s AND %s AND status<>'Отказана'
+                    GROUP BY reservation_date ORDER BY reservation_date""", (date_from,date_to))
+    st.markdown("### Натоварване по дни")
+    if daily: st.line_chart({r["reservation_date"].isoformat():int(r["total"]) for r in daily})
+    else: st.info("Няма данни за периода.")
+    left,right=st.columns(2)
+    hours=fetchall("""SELECT TO_CHAR(start_time,'HH24:MI') slot,COUNT(*) total FROM reservations
+                    WHERE reservation_date BETWEEN %s AND %s AND status<>'Отказана'
+                    GROUP BY start_time ORDER BY total DESC,start_time""", (date_from,date_to))
+    statuses=fetchall("""SELECT status,COUNT(*) total FROM reservations
+                       WHERE reservation_date BETWEEN %s AND %s GROUP BY status ORDER BY total DESC""", (date_from,date_to))
+    with left:
+        st.markdown("### Най-търсени часове")
+        if hours: st.bar_chart({r["slot"]:int(r["total"]) for r in hours})
+        else: st.info("Няма данни.")
+    with right:
+        st.markdown("### Статуси")
+        if statuses: st.bar_chart({r["status"]:int(r["total"]) for r in statuses})
+        else: st.info("Няма данни.")
+    no_pin=fetchone("""SELECT COUNT(*) c FROM reservations WHERE reservation_date BETWEEN %s AND %s
+                     AND status='Потвърдена' AND COALESCE(door_pin,'')=''""", (date_from,date_to))["c"]
+    issues=fetchone("SELECT COUNT(*) c FROM technical_issues WHERE status<>'Решено'")["c"]
+    repeat=fetchone("""SELECT COUNT(*) c FROM (SELECT user_id FROM reservations
+                      WHERE reservation_date BETWEEN %s AND %s GROUP BY user_id HAVING COUNT(*)>1) x""", (date_from,date_to))["c"]
+    op=st.columns(3); op[0].metric("Потвърдени без PIN",int(no_pin or 0)); op[1].metric("Нерешени сигнали",int(issues or 0)); op[2].metric("Повторни клиенти",int(repeat or 0))
+
+
 def admin_panel():
     st.markdown('<div class="hero"><h1>Админ панел • Сервиз за самообслужване</h1></div>', unsafe_allow_html=True)
     with st.sidebar:
-        page = st.radio("Админ меню", ["Табло", "Резервации", "Технически сигнали", "Видео съдържание", "Настройки"])
+        page = st.radio("Админ меню", ["Табло", "Резервации", "Архив", "Статистика", "Технически сигнали", "Видео съдържание", "Настройки"])
         if st.button("Изход"): st.session_state.clear(); st.rerun()
     if page == "Табло":
         pending = fetchone("SELECT COUNT(*) AS c FROM reservations WHERE status='Очаква потвърждение'")["c"]
@@ -355,6 +443,8 @@ def admin_panel():
         users = fetchone("SELECT COUNT(*) AS c FROM users")["c"]
         for col,label,value in zip(st.columns(4), ["Чакащи резервации","Заявки за части","Нови сигнали","Клиенти"], [pending,parts,issues,users]): col.metric(label,value)
     elif page == "Резервации": admin_reservations()
+    elif page == "Архив": admin_archive()
+    elif page == "Статистика": admin_statistics()
     elif page == "Технически сигнали":
         rows = fetchall("""SELECT t.*,u.first_name,u.last_name FROM technical_issues t JOIN users u ON u.id=t.user_id ORDER BY t.id DESC""")
         for r in rows:
