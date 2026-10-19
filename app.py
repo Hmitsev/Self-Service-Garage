@@ -409,7 +409,14 @@ def new_reservation(user_id):
                 "Снимайте талона хоризонтално, "
                 "така че полето (E) с VIN да се вижда ясно."
             )
-        
+            if document_source == "Снимай с камера":
+
+                st.image(
+                    APP_DIR / "vin_example.jpg",
+                    caption="Пример как трябва да бъде сниман талонът",
+                    use_container_width=True,
+                )
+
             document_source = st.radio(
                 "Как желаете да добавите талона?",
                 ["Снимай с камера", "Качи готов файл"],
