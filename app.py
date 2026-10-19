@@ -24,7 +24,7 @@ DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 for folder in (DATA_DIR, UPLOAD_DIR, PROFILE_DIR, DOC_DIR):
     folder.mkdir(parents=True, exist_ok=True)
 
-st.set_page_config(page_title="Вашият сервиз за самообслужване", page_icon="🔧", layout="wide")
+st.set_page_config(page_title="Сервиз за самообслужване", page_icon="🔧", layout="wide")
 
 if not DATABASE_URL:
     st.error("Липсва DATABASE_URL в Render Environment.")
@@ -303,7 +303,7 @@ def technical_issue(user_id):
 
 def client_panel():
     user = fetchone("SELECT * FROM users WHERE id=%s", (st.session_state.user_id,))
-    st.markdown(f'<div class="hero"><h1>Вашият сервиз за самообслужване</h1><p>Здравей, {user["first_name"]}.</p></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="hero"><h1>Сервиз за самообслужване</h1><p>Здравей, {user["first_name"]}.</p></div>', unsafe_allow_html=True)
     with st.sidebar:
         if user["profile_photo"] and Path(user["profile_photo"]).exists(): st.image(user["profile_photo"], width=110)
         st.write(f"**{user['first_name']} {user['last_name']}**")
@@ -388,7 +388,7 @@ except Exception as exc:
 
 apply_style()
 if "role" not in st.session_state:
-    st.markdown('<div class="hero"><h1>Вашият сервиз за самообслужване</h1><p>Резервация, безопасност, части и достъп в едно приложение.</p></div>', unsafe_allow_html=True)
+    st.markdown('<div class="hero"><h1>Сервиз за самообслужване</h1><p>Резервация, безопасност, части и достъп в едно приложение.</p></div>', unsafe_allow_html=True)
     tab1, tab2 = st.tabs(["Създай профил", "Вход"])
     with tab1: register_view()
     with tab2: login_view()
