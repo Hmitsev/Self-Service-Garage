@@ -198,12 +198,38 @@ def login_view():
 
 def video_section():
     st.subheader("Запознаване със сервиза")
-    labels = ["Как работи сервизът", "Безопасност", "Работа с подемника"]
-    for i, col in enumerate(st.columns(3), 1):
-        with col:
-            st.markdown(f"**{labels[i-1]}**")
-            url = setting(f"youtube_{i}")
-            st.video(url) if url else st.info("Видеото ще бъде добавено от администратора.")
+
+    videos = [
+        {
+            "title": "Как работи сервизът",
+            "setting_key": "youtube_1",
+            "description": "Кратко представяне на сервиза и начина на използване.",
+        },
+        {
+            "title": "Безопасност",
+            "setting_key": "youtube_2",
+            "description": "Основни правила за безопасна работа в сервиза.",
+        },
+        {
+            "title": "Работа с подемника",
+            "setting_key": "youtube_3",
+            "description": "Инструкции за правилна и безопасна работа с подемника.",
+        },
+    ]
+
+    columns = st.columns(3)
+
+    for column, video in zip(columns, videos):
+        with column:
+            st.markdown(f"### {video['title']}")
+
+            url = setting(video["setting_key"], "").strip()
+
+            if url:
+                st.video(url)
+            else:
+                st.info("Видеото ще бъде добавено от администратора.")
+                st.caption(video["description"])
 
 def new_reservation(user_id):
     st.subheader("Визуален календар за резервации")
