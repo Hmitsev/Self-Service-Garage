@@ -355,7 +355,6 @@ def client_panel():
 
     st.markdown("</div>", unsafe_allow_html=True)
     with st.sidebar:
-        st.write(user["profile_photo"])
 
         st.image("Designer (27).png", width=110)
         st.write(f"**{user['first_name']} {user['last_name']}**")
