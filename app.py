@@ -345,7 +345,10 @@ def client_panel():
 
     st.markdown("</div>", unsafe_allow_html=True)
     with st.sidebar:
-        if user["profile_photo"] and Path(user["profile_photo"]).exists(): st.image(user["profile_photo"], width=110)
+        st.write(user["profile_photo"])
+
+        if user["profile_photo"]:
+            st.image(user["profile_photo"], width=110)
         st.write(f"**{user['first_name']} {user['last_name']}**")
         page = st.radio("Меню", ["Начало", "Запази час", "Моите резервации", "Технически проблем", "Моят профил"])
         if st.button("Изход"): st.session_state.clear(); st.rerun()
