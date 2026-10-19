@@ -154,6 +154,20 @@ def apply_style():
     .slot-free {{padding:11px;text-align:center;border-radius:10px;background:#14532d;border:1px solid #22c55e;color:white;font-weight:700;margin-bottom:6px;}}
     .slot-busy {{padding:11px;text-align:center;border-radius:10px;background:#7f1d1d;border:1px solid #ef4444;color:white;font-weight:700;margin-bottom:6px;}}
     .stButton>button {{border-radius:10px;font-weight:700;}}
+
+    /* Client navigation buttons */
+    div[data-testid="stHorizontalBlock"] .stButton > button {{
+        width:100%; min-height:54px; border-radius:14px;
+        border:1px solid #ff4242;
+        background:linear-gradient(135deg,#720000,#d01010 55%,#8b0000);
+        color:white; font-weight:800;
+        box-shadow:0 8px 20px rgba(180,0,0,.28);
+    }}
+    div[data-testid="stHorizontalBlock"] .stButton > button:hover {{
+        border-color:#ff8585;
+        background:linear-gradient(135deg,#970000,#ef2424 55%,#a00000);
+        color:white; transform:translateY(-1px);
+    }}
     </style>""", unsafe_allow_html=True)
 
 def user_by_phone(phone):
@@ -354,30 +368,57 @@ def client_panel():
         (st.session_state.user_id,)
     )
 
+    if "client_page" not in st.session_state:
+        st.session_state.client_page = "Начало"
+
     st.markdown('<div class="hero">', unsafe_allow_html=True)
-
     c1, c2, c3 = st.columns([1, 2, 1])
-
     with c2:
         st.image(APP_DIR / "Designer (27).jpg")
-
     st.markdown(
         f"<p style='text-align:center;color:white;'>Здравей, {user['first_name']}.</p>",
         unsafe_allow_html=True,
     )
-
     st.markdown("</div>", unsafe_allow_html=True)
-    with st.sidebar:
 
+    nav_items = [
+        ("🏠 Начало", "Начало"),
+        ("📅 Запази час", "Запази час"),
+        ("🧾 Моите резервации", "Моите резервации"),
+        ("🛠 Технически проблем", "Технически проблем"),
+        ("👤 Моят профил", "Моят профил"),
+    ]
+    nav_columns = st.columns(5)
+    for column, (label, page_name) in zip(nav_columns, nav_items):
+        with column:
+            if st.button(label, key=f"client_nav_{page_name}", use_container_width=True):
+                st.session_state.client_page = page_name
+                st.rerun()
+
+    with st.sidebar:
         st.write(f"**{user['first_name']} {user['last_name']}**")
-        page = st.radio("Меню", ["Начало", "Запази час", "Моите резервации", "Технически проблем", "Моят профил"])
-        if st.button("Изход"): st.session_state.clear(); st.rerun()
-    if page == "Начало": video_section()
-    elif page == "Запази час": new_reservation(user["id"])
-    elif page == "Моите резервации": history(user["id"])
-    elif page == "Технически проблем": technical_issue(user["id"])
+        if st.button("🏠 Начало", key="sidebar_home", use_container_width=True):
+            st.session_state.client_page = "Начало"
+            st.rerun()
+        if st.button("Изход", use_container_width=True):
+            st.session_state.clear()
+            st.rerun()
+
+    page = st.session_state.client_page
+    st.markdown("---")
+    if page == "Начало":
+        video_section()
+    elif page == "Запази час":
+        new_reservation(user["id"])
+    elif page == "Моите резервации":
+        history(user["id"])
+    elif page == "Технически проблем":
+        technical_issue(user["id"])
     else:
-        st.subheader("Моят профил"); st.write(f"**Име:** {user['first_name']} {user['last_name']}"); st.write(f"**Телефон:** {user['phone']}"); st.write(f"**Имейл:** {user['email'] or '—'}")
+        st.subheader("Моят профил")
+        st.write(f"**Име:** {user['first_name']} {user['last_name']}")
+        st.write(f"**Телефон:** {user['phone']}")
+        st.write(f"**Имейл:** {user['email'] or '—'}")
 
 def admin_reservations():
     st.subheader("Мониторинг на резервациите")
