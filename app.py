@@ -291,13 +291,42 @@ def new_reservation(user_id):
             col.markdown(f'<div class="{css}">{slot["time"]}<br>{label}</div>', unsafe_allow_html=True)
     if not free_slots:
         st.warning("За избраната дата няма свободни часове."); return
-    chosen = st.selectbox("Избери свободен час", free_slots)
+    start_time = st.selectbox(
+        "Начален час",
+        free_slots
+    )
+    
+    possible_end_times = [
+        t for t in free_slots
+        if t > start_time
+    ]
+    
+    if possible_end_times:
+    
+        end_time = st.selectbox(
+            "Краен час",
+            possible_end_times
+        )
+    
+    else:
+    
+        end_time = start_time
     st.markdown('<div class="notice">Заявка за части се подава минимум 1 ден предварително.</div>', unsafe_allow_html=True)
     if st.button("Продължи към потвърждение", type="primary", use_container_width=True):
-        st.session_state.pending_slot = (selected.isoformat(), chosen)
+        st.session_state.pending_slot = (
+            selected.isoformat(),
+            start_time,
+            end_time
+        )
     if "pending_slot" not in st.session_state: return
-    day_value, time_value = st.session_state.pending_slot
-    st.info(f"Избран час: {day_value} в {time_value}")
+    day_value, start_value, end_value = st.session_state.pending_slot
+    st.info(
+        f"Избран период: "
+        f"{day_value} "
+        f"от {start_value} "
+        f"до {end_value}"
+    )
+
     wants = st.radio("Желаете ли да закупите части предварително?", ["Не, само резервация", "Да, желая части"])
     parts_comment = vin = doc_path = None; valid_parts = True
     if wants.startswith("Да"):
