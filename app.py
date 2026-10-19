@@ -330,6 +330,7 @@ def video_section():
         {
             "title": "Как работи Приложението",
             "setting_key": "youtube_1",
+            "description": "Основни правила за работа с приложението.",
     
         },
         {
