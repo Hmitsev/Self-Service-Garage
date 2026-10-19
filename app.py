@@ -499,16 +499,58 @@ def history(user_id):
                         st.rerun()
 
 def technical_issue(user_id):
+
     st.subheader("Технически проблем")
+
     with st.form("issue_form"):
-        category = st.selectbox("Категория", ["Подемник", "Инструменти", "Врата / smart lock", "Осветление", "Друго"])
-        description = st.text_area("Опиши проблема *"); photo = st.camera_input("Снимай проблема")
-        submit = st.form_submit_button("Изпрати сигнал", use_container_width=True)
+
+        category = st.selectbox(
+            "Категория",
+            [
+                "Подемник",
+                "Инструменти",
+                "Врата / smart lock",
+                "Осветление",
+                "Друго",
+            ],
+        )
+
+        description = st.text_area(
+            "Опиши проблема *"
+        )
+
+        add_photo = st.toggle(
+            "📷 Добави снимка към сигнала"
+        )
+
+        photo = None
+
+        if add_photo:
+            photo = st.camera_input(
+                "Снимай проблема"
+            )
+
+        submit = st.form_submit_button(
+            "Изпрати сигнал",
+            use_container_width=True,
+        )
+
     if submit:
-        if not description.strip(): st.error("Добави описание.")
+
+        if not description.strip():
+            st.error("Добави описание.")
+
         else:
-            execute("INSERT INTO technical_issues(user_id,category,description,photo) VALUES(%s,%s,%s,%s)",
-                    (user_id, category, description.strip(), save_upload(photo, DOC_DIR, "issue")))
+            execute(
+                "INSERT INTO technical_issues(user_id,category,description,photo) VALUES(%s,%s,%s,%s)",
+                (
+                    user_id,
+                    category,
+                    description.strip(),
+                    save_upload(photo, DOC_DIR, "issue"),
+                ),
+            )
+
             st.success("Сигналът е изпратен.")
 
 def client_panel():
