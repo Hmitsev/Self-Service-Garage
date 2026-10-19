@@ -12,8 +12,8 @@ DATA_DIR = APP_DIR / "data"
 UPLOAD_DIR = DATA_DIR / "uploads"
 PROFILE_DIR = UPLOAD_DIR / "profiles"
 DOC_DIR = UPLOAD_DIR / "documents"
-DB_PATH = DATA_DIR / "self_service_garage.db"
-BG_PATH = APP_DIR / "garage_background.png"
+DB_PATH = DATA_DIR / "Designer (26).db"
+BG_PATH = APP_DIR / "Designer (25).png"
 
 for folder in (DATA_DIR, UPLOAD_DIR, PROFILE_DIR, DOC_DIR):
     folder.mkdir(parents=True, exist_ok=True)
