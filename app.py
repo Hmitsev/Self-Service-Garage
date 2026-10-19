@@ -326,8 +326,24 @@ def technical_issue(user_id):
             st.success("Сигналът е изпратен.")
 
 def client_panel():
-    user = fetchone("SELECT * FROM users WHERE id=%s", (st.session_state.user_id,))
-    st.markdown(f'<div class="hero"><h1>Сервиз за самообслужване</h1><p>Здравей, {user["first_name"]}.</p></div>', unsafe_allow_html=True)
+    user = fetchone(
+        "SELECT * FROM users WHERE id=%s",
+        (st.session_state.user_id,)
+    )
+
+    st.markdown('<div class="hero">', unsafe_allow_html=True)
+
+    c1, c2, c3 = st.columns([1, 2, 1])
+
+    with c2:
+        st.image("Designer (27).png", width=320)
+
+    st.markdown(
+        f"<p style='text-align:center;color:white;'>Здравей, {user['first_name']}.</p>",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("</div>", unsafe_allow_html=True)
     with st.sidebar:
         if user["profile_photo"] and Path(user["profile_photo"]).exists(): st.image(user["profile_photo"], width=110)
         st.write(f"**{user['first_name']} {user['last_name']}**")
@@ -395,7 +411,20 @@ def admin_statistics():
     if daily: st.line_chart({r["reservation_date"].isoformat():int(r["total"]) for r in daily})
 
 def admin_panel():
-    st.markdown('<div class="hero"><h1>Админ панел • Сервиз за самообслужване</h1></div>', unsafe_allow_html=True)
+
+    st.markdown('<div class="hero">', unsafe_allow_html=True)
+
+    c1, c2, c3 = st.columns([1, 2, 1])
+
+    with c2:
+        st.image("Designer (27).png", width=320)
+
+    st.markdown(
+        "<p style='text-align:center;color:white;'>Административен панел</p>",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("</div>", unsafe_allow_html=True)
     with st.sidebar:
         page = st.radio("Админ меню", ["Табло", "Резервации", "Архив", "Статистика", "Технически сигнали", "Видео съдържание", "Настройки"])
         if st.button("Изход"): st.session_state.clear(); st.rerun()
