@@ -219,7 +219,6 @@ def day_slots(selected_date):
 
 def register_view():
     st.subheader("Бърза регистрация")
-    st.caption("След сканиране на QR/баркода клиентът попада директно тук.")
     with st.form("register_form"):
         c1, c2 = st.columns(2)
         first = c1.text_input("Име *"); last = c2.text_input("Фамилия *")
