@@ -759,15 +759,7 @@ def admin_panel():
         height=0,
     )
 
-    st.markdown('<div class="hero">', unsafe_allow_html=True)
-    c1, c2, c3 = st.columns([1, 2, 1])
-    with c2:
-        st.image(APP_DIR / "Designer (27).jpg")
-    st.markdown(
-        "<p style='text-align:center;color:white;'>Административен панел</p>",
-        unsafe_allow_html=True,
-    )
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.subheader("Административен панел")
 
     with st.sidebar:
         page = st.radio(
