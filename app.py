@@ -394,7 +394,11 @@ def new_reservation(user_id):
             st.error("За заявка с части избери период поне 1 ден напред.")
             valid_parts = False
         parts_comment = st.text_area("Какви части желаете? *")
-        vin = st.text_input("Номер на рама (VIN) *", max_chars=17).upper().strip()
+        vin = st.text_input(
+            "Номер на рама (VIN)",
+            max_chars=17,
+            help="Въведете 17-символен VIN или приложете снимка на талона.",
+        ).upper().strip()
         add_registration_doc = st.checkbox(
             "📷 Добави снимка на талона"
         )
@@ -457,8 +461,25 @@ def new_reservation(user_id):
         disabled=not valid_parts,
     ):
         wants_parts = wants.startswith("Да")
-        if wants_parts and (not parts_comment or not vin or len(vin) != 17):
-            st.error("Задължителни са описание и 17-символен VIN.")
+
+        if wants_parts and not parts_comment.strip():
+            st.error("Добавете описание на желаните части.")
+            return
+        
+        has_valid_vin = bool(vin) and len(vin) == 17
+        has_registration_document = bool(doc_path)
+        
+        if wants_parts and not has_valid_vin and not has_registration_document:
+            st.error(
+                "Въведете 17-символен VIN или приложете снимка/файл на талона."
+            )
+            return
+        
+        if vin and len(vin) != 17 and not has_registration_document:
+            st.error(
+                "VIN трябва да съдържа точно 17 символа. "
+                "Или приложете снимка/файл на талона."
+            )
             return
 
         reservation_date = date.fromisoformat(day_value)
