@@ -313,21 +313,32 @@ def login_view():
             st.error("Невалиден администраторски PIN.")
 
 def video_section():
-    st.subheader("Запознаване със сервиза")
+    st.markdown(
+        """
+        <h2 style="
+            color:#ff2f2f;
+            font-weight:800;
+            margin-bottom:20px;
+        ">
+            Запознаване със сервиза
+        </h2>
+        """,
+        unsafe_allow_html=True,
+    )
 
     videos = [
         {
             "title": "Как работи Приложението",
             "setting_key": "youtube_1",
-            "description": "Кратко представяне на сервиза и начина на използване.",
+    
         },
         {
-            "title": "Безопасност",
+            "title": "Как да използвам Сервиза",
             "setting_key": "youtube_2",
-            "description": "Основни правила за безопасна работа в сервиза.",
+            "description": "Основни правила за работа в сервиза.",
         },
         {
-            "title": "Работа с подемника",
+            "title": "Работа с подемник и Правила за Безопастност",
             "setting_key": "youtube_3",
             "description": "Инструкции за правилна и безопасна работа с подемника.",
         },
