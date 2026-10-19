@@ -12,8 +12,9 @@ DATA_DIR = APP_DIR / "data"
 UPLOAD_DIR = DATA_DIR / "uploads"
 PROFILE_DIR = UPLOAD_DIR / "profiles"
 DOC_DIR = UPLOAD_DIR / "documents"
-DB_PATH = DATA_DIR / "Designer (26).db"
-BG_PATH = APP_DIR / "Designer (25).png"
+DB_PATH = DATA_DIR / "self_service_garage.db"
+CLIENT_BG = APP_DIR / "Designer (25).png"
+ADMIN_BG = APP_DIR / "Designer (26).png"
 
 for folder in (DATA_DIR, UPLOAD_DIR, PROFILE_DIR, DOC_DIR):
     folder.mkdir(parents=True, exist_ok=True)
@@ -108,11 +109,17 @@ def save_upload(uploaded, folder: Path, prefix: str):
 
 
 def apply_style():
+    if st.session_state.get("role") == "admin":
+        background_file = ADMIN_BG
+    else:
+        background_file = CLIENT_BG
+
     bg_css = ""
-    if BG_PATH.exists():
+    if background_file.exists():
         import base64
-        encoded = base64.b64encode(BG_PATH.read_bytes()).decode()
-        bg_css = f"background-image:linear-gradient(rgba(15,0,0,.89),rgba(15,0,0,.92)),url(data:image/png;base64,{encoded});"
+        encoded = base64.b64encode(background_file.read_bytes()).decode()
+        bg_css = f"background-image:linear-gradient(rgba(15,0,0,.86),rgba(15,0,0,.90)),url(data:image/png;base64,{encoded});"
+
     st.markdown(f"""
     <style>
     .stApp {{{bg_css} background-size:cover; background-position:center; background-attachment:fixed;}}
@@ -122,7 +129,8 @@ def apply_style():
     div[data-testid="stMetric"] {{background:rgba(255,255,255,.08);border:1px solid #7c2020;border-radius:14px;padding:12px;}}
     .hero {{padding:22px;border-radius:18px;background:linear-gradient(120deg,rgba(150,0,0,.9),rgba(20,0,0,.82));border:1px solid #e63d3d;margin-bottom:18px;}}
     .notice {{padding:12px 15px;border-left:5px solid #ffcc00;background:rgba(75,55,0,.75);border-radius:8px;color:white;}}
-    .card {{padding:16px;border-radius:14px;background:rgba(20,20,20,.82);border:1px solid rgba(255,255,255,.15);}}
+    .slot-free {{padding:11px;text-align:center;border-radius:10px;background:#14532d;border:1px solid #22c55e;color:white;font-weight:700;margin-bottom:6px;}}
+    .slot-busy {{padding:11px;text-align:center;border-radius:10px;background:#7f1d1d;border:1px solid #ef4444;color:white;font-weight:700;margin-bottom:6px;opacity:.92;}}
     .stButton>button {{border-radius:10px;font-weight:700;}}
     </style>
     """, unsafe_allow_html=True)
@@ -133,22 +141,31 @@ def user_by_phone(phone):
         return conn.execute("SELECT * FROM users WHERE phone=?", (phone.strip(),)).fetchone()
 
 
-def available_slots(selected_date):
+def day_slots(selected_date):
     start = datetime.combine(selected_date, datetime.strptime(setting("open_hour", "09:00"), "%H:%M").time())
     end = datetime.combine(selected_date, datetime.strptime(setting("close_hour", "18:00"), "%H:%M").time())
     minutes = int(setting("slot_minutes", "60"))
+
     with db() as conn:
-        busy = {r["start_time"] for r in conn.execute(
-            "SELECT start_time FROM reservations WHERE reservation_date=? AND status NOT IN ('Отказана','Анулирана')",
-            (selected_date.isoformat(),)
-        ).fetchall()}
+        rows = conn.execute(
+            """SELECT start_time, status
+               FROM reservations
+               WHERE reservation_date=?
+               AND status NOT IN ('Отказана','Анулирана')""",
+            (selected_date.isoformat(),),
+        ).fetchall()
+
+    busy = {row["start_time"] for row in rows}
     slots = []
     while start + timedelta(minutes=minutes) <= end:
-        value = start.strftime("%H:%M")
-        if value not in busy:
-            slots.append(value)
+        slot_time = start.strftime("%H:%M")
+        slots.append({"time": slot_time, "is_busy": slot_time in busy})
         start += timedelta(minutes=minutes)
     return slots
+
+
+def available_slots(selected_date):
+    return [slot["time"] for slot in day_slots(selected_date) if not slot["is_busy"]]
 
 
 def register_view():
@@ -221,51 +238,124 @@ def video_section():
 
 
 def new_reservation(user_id):
-    st.subheader("Запази час")
-    selected = st.date_input("Избери дата", min_value=date.today(), value=date.today() + timedelta(days=1))
-    slots = available_slots(selected)
-    if not slots:
-        st.warning("Няма свободни часове за избраната дата.")
+    st.subheader("Визуален календар за резервации")
+    selected = st.date_input(
+        "Избери дата",
+        min_value=date.today(),
+        value=date.today() + timedelta(days=1),
+    )
+
+    slots = day_slots(selected)
+    st.caption("🟢 Свободен час    🔴 Зает час")
+
+    free_slots = [slot["time"] for slot in slots if not slot["is_busy"]]
+    for row_start in range(0, len(slots), 4):
+        columns = st.columns(4)
+        for column, slot in zip(columns, slots[row_start:row_start + 4]):
+            with column:
+                if slot["is_busy"]:
+                    st.markdown(
+                        f'<div class="slot-busy">{slot["time"]}<br>ЗАЕТ</div>',
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.markdown(
+                        f'<div class="slot-free">{slot["time"]}<br>СВОБОДЕН</div>',
+                        unsafe_allow_html=True,
+                    )
+
+    if not free_slots:
+        st.warning("За избраната дата няма свободни часове.")
         return
-    chosen = st.selectbox("Свободен начален час", slots)
-    st.markdown('<div class="notice">Ако желаете части, заявката трябва да бъде подадена минимум 1 ден преди резервирания час.</div>', unsafe_allow_html=True)
-    if st.button("Продължи към потвърждение", type="primary"):
+
+    chosen = st.selectbox("Избери свободен час", free_slots)
+    st.markdown(
+        '<div class="notice">Ако желаете части, заявката трябва да бъде подадена минимум 1 ден преди резервирания час.</div>',
+        unsafe_allow_html=True,
+    )
+
+    if st.button("Продължи към потвърждение", type="primary", use_container_width=True):
         st.session_state.pending_slot = (selected.isoformat(), chosen)
-    if "pending_slot" in st.session_state:
-        day_value, time_value = st.session_state.pending_slot
-        st.info(f"Избран час: {day_value} в {time_value}")
-        wants = st.radio("Желаете ли да закупите части предварително?", ["Не, само резервация", "Да, желая части"])
-        parts_comment = vin = doc_path = None
-        valid_parts = True
-        if wants.startswith("Да"):
-            reservation_dt = datetime.combine(date.fromisoformat(day_value), datetime.strptime(time_value, "%H:%M").time())
-            if reservation_dt < datetime.now() + timedelta(days=1):
-                st.error("За заявка с части избери час, който е поне 1 ден напред.")
-                valid_parts = False
-            parts_comment = st.text_area("Какви части желаете? *", placeholder="Напр. масло, маслен филтър, предни накладки...")
-            vin = st.text_input("Номер на рама (VIN) *", max_chars=17).upper().strip()
-            doc_camera = st.camera_input("Снимай талона")
-            doc_upload = st.file_uploader("или качи снимка на талона", type=["jpg", "jpeg", "png", "pdf"])
-            if doc_camera or doc_upload:
-                doc_path = save_upload(doc_camera or doc_upload, DOC_DIR, "talon")
-        if st.button("Потвърди и изпрати заявката", use_container_width=True, disabled=not valid_parts):
-            wants_parts = wants.startswith("Да")
-            if wants_parts and (not parts_comment or len(vin) != 17):
-                st.error("За заявка за части са задължителни описание и 17-символен VIN.")
-            else:
-                minutes = int(setting("slot_minutes", "60"))
-                end_time = (datetime.strptime(time_value, "%H:%M") + timedelta(minutes=minutes)).strftime("%H:%M")
-                try:
-                    with db() as conn:
-                        conn.execute("""INSERT INTO reservations(user_id,reservation_date,start_time,end_time,wants_parts,parts_comment,vin,registration_doc,parts_status,created_at)
-                                      VALUES(?,?,?,?,?,?,?,?,?,?)""",
-                                     (user_id, day_value, time_value, end_time, int(wants_parts), parts_comment, vin, doc_path,
-                                      "Очаква преглед" if wants_parts else None, datetime.now().isoformat(timespec="seconds")))
-                    del st.session_state.pending_slot
-                    st.success("Заявката е изпратена. Очаква потвърждение от администратор и PIN за достъп.")
-                    st.rerun()
-                except sqlite3.IntegrityError:
-                    st.error("Този час току-що е зает. Избери друг свободен час.")
+
+    if "pending_slot" not in st.session_state:
+        return
+
+    day_value, time_value = st.session_state.pending_slot
+    st.info(f"Избран час: {day_value} в {time_value}")
+    wants = st.radio(
+        "Желаете ли да закупите части предварително?",
+        ["Не, само резервация", "Да, желая части"],
+    )
+
+    parts_comment = None
+    vin = None
+    doc_path = None
+    valid_parts = True
+
+    if wants.startswith("Да"):
+        reservation_dt = datetime.combine(
+            date.fromisoformat(day_value),
+            datetime.strptime(time_value, "%H:%M").time(),
+        )
+        if reservation_dt < datetime.now() + timedelta(days=1):
+            st.error("За заявка с части избери час, който е поне 1 ден напред.")
+            valid_parts = False
+
+        parts_comment = st.text_area(
+            "Какви части желаете? *",
+            placeholder="Напр. масло, маслен филтър, предни накладки...",
+        )
+        vin = st.text_input("Номер на рама (VIN) *", max_chars=17).upper().strip()
+        doc_camera = st.camera_input("Снимай талона")
+        doc_upload = st.file_uploader(
+            "или качи снимка на талона",
+            type=["jpg", "jpeg", "png", "pdf"],
+        )
+        if doc_camera or doc_upload:
+            doc_path = save_upload(doc_camera or doc_upload, DOC_DIR, "talon")
+
+    if st.button(
+        "Потвърди и изпрати заявката",
+        use_container_width=True,
+        disabled=not valid_parts,
+    ):
+        wants_parts = wants.startswith("Да")
+        if wants_parts and (not parts_comment or not vin or len(vin) != 17):
+            st.error("За заявка за части са задължителни описание и 17-символен VIN.")
+            return
+
+        minutes = int(setting("slot_minutes", "60"))
+        end_time = (
+            datetime.strptime(time_value, "%H:%M") + timedelta(minutes=minutes)
+        ).strftime("%H:%M")
+
+        try:
+            with db() as conn:
+                conn.execute(
+                    """INSERT INTO reservations(
+                           user_id,reservation_date,start_time,end_time,
+                           wants_parts,parts_comment,vin,registration_doc,
+                           parts_status,created_at
+                       ) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        user_id,
+                        day_value,
+                        time_value,
+                        end_time,
+                        int(wants_parts),
+                        parts_comment,
+                        vin,
+                        doc_path,
+                        "Очаква преглед" if wants_parts else None,
+                        datetime.now().isoformat(timespec="seconds"),
+                    ),
+                )
+            del st.session_state.pending_slot
+            st.success("Заявката е изпратена. Часът вече се показва в червено.")
+            st.rerun()
+        except sqlite3.IntegrityError:
+            st.error("Този час току-що е зает. Избери друг свободен час.")
+            st.rerun()
 
 
 def history(user_id):
