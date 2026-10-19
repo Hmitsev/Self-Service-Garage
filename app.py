@@ -493,11 +493,7 @@ def admin_auto_refresh():
 
         st.session_state.last_refresh = now
         st.rerun()
-def admin_panel():
-
-    st.markdown('<div class="hero">', unsafe_allow_html=True)
-
-    c1, c2, c3 = st.columns([1, 2, 1])
+        
 def admin_panel():
 
     admin_auto_refresh()
