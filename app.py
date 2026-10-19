@@ -181,16 +181,40 @@ def user_by_phone(phone):
     return fetchone("SELECT * FROM users WHERE phone=%s", (phone.strip(),))
 
 def day_slots(selected_date):
-    start = datetime.combine(selected_date, datetime.strptime(setting("open_hour", "09:00"), "%H:%M").time())
-    end = datetime.combine(selected_date, datetime.strptime(setting("close_hour", "18:00"), "%H:%M").time())
+    open_dt = datetime.combine(
+        selected_date,
+        datetime.strptime(setting("open_hour", "09:00"), "%H:%M").time(),
+    )
+    close_dt = datetime.combine(
+        selected_date,
+        datetime.strptime(setting("close_hour", "18:00"), "%H:%M").time(),
+    )
     minutes = int(setting("slot_minutes", "60"))
-    rows = fetchall("SELECT start_time FROM reservations WHERE reservation_date=%s AND status NOT IN ('Отказана','Анулирана')", (selected_date,))
-    busy = {row["start_time"].strftime("%H:%M") for row in rows}
+    rows = fetchall(
+        """SELECT start_time,end_time FROM reservations
+           WHERE reservation_date=%s
+             AND status NOT IN ('Отказана','Анулирана')""",
+        (selected_date,),
+    )
+
+    reservations = [
+        (
+            datetime.combine(selected_date, row["start_time"]),
+            datetime.combine(selected_date, row["end_time"]),
+        )
+        for row in rows
+    ]
+
     slots = []
-    while start + timedelta(minutes=minutes) <= end:
-        slot_time = start.strftime("%H:%M")
-        slots.append({"time": slot_time, "is_busy": slot_time in busy})
-        start += timedelta(minutes=minutes)
+    current = open_dt
+    while current + timedelta(minutes=minutes) <= close_dt:
+        slot_end = current + timedelta(minutes=minutes)
+        is_busy = any(
+            current < reserved_end and slot_end > reserved_start
+            for reserved_start, reserved_end in reservations
+        )
+        slots.append({"time": current.strftime("%H:%M"), "is_busy": is_busy})
+        current = slot_end
     return slots
 
 def register_view():
@@ -281,85 +305,170 @@ def video_section():
 
 def new_reservation(user_id):
     st.subheader("Визуален календар за резервации")
-    selected = st.date_input("Избери дата", min_value=date.today(), value=date.today() + timedelta(days=1))
-    slots = day_slots(selected); st.caption("🟢 Свободен час    🔴 Зает час")
-    free_slots = [s["time"] for s in slots if not s["is_busy"]]
+    selected = st.date_input(
+        "Избери дата",
+        min_value=date.today(),
+        value=date.today() + timedelta(days=1),
+    )
+
+    slots = day_slots(selected)
+    st.caption("🟢 Свободен час    🔴 Зает час")
+    free_slots = [slot["time"] for slot in slots if not slot["is_busy"]]
+
     for start_index in range(0, len(slots), 4):
         for col, slot in zip(st.columns(4), slots[start_index:start_index + 4]):
             css = "slot-busy" if slot["is_busy"] else "slot-free"
             label = "ЗАЕТ" if slot["is_busy"] else "СВОБОДЕН"
-            col.markdown(f'<div class="{css}">{slot["time"]}<br>{label}</div>', unsafe_allow_html=True)
+            col.markdown(
+                f'<div class="{css}">{slot["time"]}<br>{label}</div>',
+                unsafe_allow_html=True,
+            )
+
     if not free_slots:
-        st.warning("За избраната дата няма свободни часове."); return
-    start_time = st.selectbox(
-        "Начален час",
-        free_slots
+        st.warning("За избраната дата няма свободни часове.")
+        return
+
+    slot_minutes = int(setting("slot_minutes", "60"))
+    start_value = st.selectbox("Начален час", free_slots)
+    start_index = next(i for i, slot in enumerate(slots) if slot["time"] == start_value)
+
+    consecutive_free = 0
+    for slot in slots[start_index:]:
+        if slot["is_busy"]:
+            break
+        consecutive_free += 1
+
+    duration_options = list(range(1, consecutive_free + 1))
+    duration_slots = st.selectbox(
+        "Продължителност",
+        duration_options,
+        format_func=lambda value: f"{value} час" if value == 1 else f"{value} часа",
     )
-    
-    possible_end_times = [
-        t for t in free_slots
-        if t > start_time
-    ]
-    
-    if possible_end_times:
-    
-        end_time = st.selectbox(
-            "Краен час",
-            possible_end_times
-        )
-    
-    else:
-    
-        end_time = start_time
-    st.markdown('<div class="notice">Заявка за части се подава минимум 1 ден предварително.</div>', unsafe_allow_html=True)
+
+    start_dt = datetime.combine(
+        selected,
+        datetime.strptime(start_value, "%H:%M").time(),
+    )
+    end_dt = start_dt + timedelta(minutes=slot_minutes * duration_slots)
+    end_value = end_dt.strftime("%H:%M")
+
+    st.info(
+        f"Избран период: {selected.isoformat()} от {start_value} до {end_value} "
+        f"({duration_slots} {'час' if duration_slots == 1 else 'часа'})"
+    )
+    st.markdown(
+        '<div class="notice">Заявка за части се подава минимум 1 ден предварително.</div>',
+        unsafe_allow_html=True,
+    )
+
     if st.button("Продължи към потвърждение", type="primary", use_container_width=True):
         st.session_state.pending_slot = (
             selected.isoformat(),
-            start_time,
-            end_time
+            start_value,
+            end_value,
+            duration_slots,
         )
-    if "pending_slot" not in st.session_state: return
-    day_value, start_value, end_value = st.session_state.pending_slot
-    st.info(
-        f"Избран период: "
-        f"{day_value} "
-        f"от {start_value} "
-        f"до {end_value}"
+
+    if "pending_slot" not in st.session_state:
+        return
+
+    day_value, pending_start, pending_end, pending_duration = st.session_state.pending_slot
+    st.success(
+        f"Период за потвърждение: {day_value} от {pending_start} до {pending_end} "
+        f"({pending_duration} {'час' if pending_duration == 1 else 'часа'})"
     )
 
-    wants = st.radio("Желаете ли да закупите части предварително?", ["Не, само резервация", "Да, желая части"])
-    parts_comment = vin = doc_path = None; valid_parts = True
+    wants = st.radio(
+        "Желаете ли да закупите части предварително?",
+        ["Не, само резервация", "Да, желая части"],
+    )
+    parts_comment = vin = doc_path = None
+    valid_parts = True
+
     if wants.startswith("Да"):
-        reservation_dt = datetime.combine(date.fromisoformat(day_value), datetime.strptime(time_value, "%H:%M").time())
+        reservation_dt = datetime.combine(
+            date.fromisoformat(day_value),
+            datetime.strptime(pending_start, "%H:%M").time(),
+        )
         if reservation_dt < datetime.now() + timedelta(days=1):
-            st.error("За заявка с части избери час поне 1 ден напред."); valid_parts = False
+            st.error("За заявка с части избери период поне 1 ден напред.")
+            valid_parts = False
         parts_comment = st.text_area("Какви части желаете? *")
         vin = st.text_input("Номер на рама (VIN) *", max_chars=17).upper().strip()
         doc_camera = st.camera_input("Снимай талона")
-        doc_upload = st.file_uploader("или качи талона", type=["jpg", "jpeg", "png", "pdf"])
-        if doc_camera or doc_upload: doc_path = save_upload(doc_camera or doc_upload, DOC_DIR, "talon")
-    if st.button("Потвърди и изпрати заявката", use_container_width=True, disabled=not valid_parts):
+        doc_upload = st.file_uploader(
+            "или качи талона",
+            type=["jpg", "jpeg", "png", "pdf"],
+        )
+        if doc_camera or doc_upload:
+            doc_path = save_upload(doc_camera or doc_upload, DOC_DIR, "talon")
+
+    if st.button(
+        "Потвърди и изпрати заявката",
+        use_container_width=True,
+        disabled=not valid_parts,
+    ):
         wants_parts = wants.startswith("Да")
         if wants_parts and (not parts_comment or not vin or len(vin) != 17):
-            st.error("Задължителни са описание и 17-символен VIN."); return
-        minutes = int(setting("slot_minutes", "60"))
-        end_time = (datetime.strptime(time_value, "%H:%M") + timedelta(minutes=minutes)).time()
+            st.error("Задължителни са описание и 17-символен VIN.")
+            return
+
+        reservation_date = date.fromisoformat(day_value)
+        start_time_db = datetime.strptime(pending_start, "%H:%M").time()
+        end_time_db = datetime.strptime(pending_end, "%H:%M").time()
+
+        overlap = fetchone(
+            """SELECT id FROM reservations
+               WHERE reservation_date=%s
+                 AND status NOT IN ('Отказана','Анулирана')
+                 AND start_time < %s
+                 AND end_time > %s
+               LIMIT 1""",
+            (reservation_date, end_time_db, start_time_db),
+        )
+        if overlap:
+            st.error("Избраният период вече съдържа зает час. Избери друг период.")
+            st.session_state.pop("pending_slot", None)
+            st.rerun()
+
         try:
-            execute("""INSERT INTO reservations(user_id,reservation_date,start_time,end_time,wants_parts,parts_comment,vin,registration_doc,parts_status)
-                       VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                    (user_id, date.fromisoformat(day_value), datetime.strptime(time_value, "%H:%M").time(), end_time,
-                     wants_parts, parts_comment, vin, doc_path, "Очаква преглед" if wants_parts else None))
-            del st.session_state.pending_slot; st.success("Заявката е изпратена."); st.rerun()
+            execute(
+                """INSERT INTO reservations(
+                       user_id,reservation_date,start_time,end_time,wants_parts,
+                       parts_comment,vin,registration_doc,parts_status
+                   ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (
+                    user_id,
+                    reservation_date,
+                    start_time_db,
+                    end_time_db,
+                    wants_parts,
+                    parts_comment,
+                    vin,
+                    doc_path,
+                    "Очаква преглед" if wants_parts else None,
+                ),
+            )
+            st.session_state.pop("pending_slot", None)
+            st.session_state.client_flash = (
+                f"Потвърдено: резервацията е изпратена за {day_value}, "
+                f"от {pending_start} до {pending_end}."
+            )
+            st.rerun()
         except IntegrityError:
-            st.error("Този час току-що е зает. Избери друг."); st.rerun()
+            st.error("Началният час току-що е резервиран. Избери друг период.")
+            st.session_state.pop("pending_slot", None)
+            st.rerun()
 
 def history(user_id):
     st.subheader("История на резервациите")
     rows=fetchall("SELECT * FROM reservations WHERE user_id=%s ORDER BY reservation_date DESC,start_time DESC",(user_id,))
     if not rows: st.info("Все още няма резервации."); return
     for r in rows:
-        day=r["reservation_date"].isoformat(); hour=r["start_time"].strftime("%H:%M")
-        with st.expander(f"{day} • {hour} • {r['status']}"):
+        day=r["reservation_date"].isoformat()
+        start_hour=r["start_time"].strftime("%H:%M")
+        end_hour=r["end_time"].strftime("%H:%M")
+        with st.expander(f"{day} • {start_hour}–{end_hour} • {r['status']}"):
             st.write("**Заявка за части:**","Да" if r["wants_parts"] else "Не")
             if r["parts_status"]: st.write("**Статус части:**",r["parts_status"])
             if r.get("parts_offer"): st.info(r["parts_offer"])
@@ -478,8 +587,10 @@ def admin_reservations():
     rows=[r for r in rows if not selected or r["status"] in selected]
     part_statuses=["—","Очаква преглед","Можем да подготвим","Не можем да подготвим","Клиентът потвърди","Клиентът отказа","Подготвени"]
     for r in rows:
-        day=r["reservation_date"].isoformat(); hour=r["start_time"].strftime("%H:%M")
-        with st.expander(f"#{r['id']} • {day} {hour} • {r['first_name']} {r['last_name']} • {r['status']}"):
+        day=r["reservation_date"].isoformat()
+        start_hour=r["start_time"].strftime("%H:%M")
+        end_hour=r["end_time"].strftime("%H:%M")
+        with st.expander(f"#{r['id']} • {day} {start_hour}–{end_hour} • {r['first_name']} {r['last_name']} • {r['status']}"):
             st.write(f"**Телефон:** {r['phone']}"); st.write("**Части:**","Да" if r["wants_parts"] else "Не")
             if r["wants_parts"]:
                 st.write("**VIN:**",r["vin"] or "—"); st.write("**Заявка:**",r["parts_comment"] or "—")
@@ -512,7 +623,11 @@ def admin_archive():
                    WHERE reservation_date BETWEEN %s AND %s AND status IN ('Завършена','Отказана') ORDER BY reservation_date DESC,start_time DESC""",(d1,d2))
     st.metric("Архивирани",len(rows))
     for r in rows:
-        with st.expander(f"{r['status']} • {r['reservation_date']} {r['start_time'].strftime('%H:%M')} • {r['first_name']} {r['last_name']}"):
+        with st.expander(
+            f"{r['status']} • {r['reservation_date']} "
+            f"{r['start_time'].strftime('%H:%M')}–{r['end_time'].strftime('%H:%M')} • "
+            f"{r['first_name']} {r['last_name']}"
+        ):
             st.write("**Телефон:**",r["phone"]); st.write("**Оферта:**",r.get("parts_offer") or "—"); st.write("**Решение:**",r.get("customer_parts_decision") or "—"); st.write("**Коментар:**",r.get("customer_parts_comment") or "—")
 
 
