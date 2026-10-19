@@ -67,7 +67,7 @@ def execute(query, params=(), returning=False):
 
 def hash_value(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
-
+@st.cache_resource
 def init_db():
     statements = [
         """CREATE TABLE IF NOT EXISTS users (
