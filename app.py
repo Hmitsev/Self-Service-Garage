@@ -993,59 +993,135 @@ def admin_panel():
         admin_archive()
     elif page == "Статистика":
         admin_statistics()
-    elif page == "Технически сигнали":
-        rows = fetchall("""SELECT t.*,u.first_name,u.last_name FROM technical_issues t
-                         JOIN users u ON u.id=t.user_id
-                         WHERE t.status<>'Решено'
-                         ORDER BY t.id DESC""")
-        if not rows:
-            st.info("Няма активни технически сигнали.")
-        for r in rows:
-            with st.expander(f"#{r['id']} • {r['category']} • {r['first_name']} {r['last_name']} • {r['status']}"):
-                st.write(r["description"])
-        if r.get("photo"):
+        elif page == "Технически сигнали":
 
-            issue_photo_path = Path(r["photo"])
-
-            if issue_photo_path.exists():
-
-                st.markdown("**Снимка към сигнала:**")
-
-                st.image(
-                    str(issue_photo_path),
-                    caption=f"Технически сигнал #{r['id']}",
-                    use_container_width=True,
-                )
-
-                with open(issue_photo_path, "rb") as issue_file:
-                    st.download_button(
-                        "📥 Изтегли снимката",
-                        data=issue_file.read(),
-                        file_name=issue_photo_path.name,
-                        mime="image/jpeg",
-                        key=f"download_issue_{r['id']}",
-                        use_container_width=True,
-                    )
-
-            else:
-                st.warning(
-                    "Към сигнала има записана снимка, "
-                    "но файлът не е наличен на сървъра."
-                )
-                status_options = ["Ново", "В работа", "Решено"]
-                new = st.selectbox(
-                    "Статус",
-                    status_options,
-                    index=status_options.index(r["status"]),
-                    key=f"is_{r['id']}",
-                )
-                if st.button("Обнови", key=f"iu_{r['id']}"):
-                    execute("UPDATE technical_issues SET status=%s WHERE id=%s", (new,r["id"]))
-                    if new == "Решено":
-                        st.session_state.admin_flash = f"Потвърдено: сигнал #{r['id']} е решен и преместен в Архив."
+            rows = fetchall(
+                """
+                SELECT
+                    t.*,
+                    u.first_name,
+                    u.last_name
+                FROM technical_issues t
+                JOIN users u
+                    ON u.id = t.user_id
+                WHERE t.status <> 'Решено'
+                ORDER BY t.id DESC
+                """
+            )
+    
+            if not rows:
+                st.info("Няма активни технически сигнали.")
+    
+            for r in rows:
+    
+                with st.expander(
+                    f"#{r['id']} • {r['category']} • "
+                    f"{r['first_name']} {r['last_name']} • "
+                    f"{r['status']}"
+                ):
+    
+                    st.write(r["description"])
+    
+                    if r.get("photo"):
+    
+                        issue_photo_path = Path(r["photo"])
+    
+                        if issue_photo_path.exists():
+    
+                            st.markdown("**Снимка към сигнала:**")
+    
+                            suffix = issue_photo_path.suffix.lower()
+    
+                            if suffix in [
+                                ".jpg",
+                                ".jpeg",
+                                ".png",
+                                ".webp",
+                            ]:
+                                st.image(
+                                    str(issue_photo_path),
+                                    caption=f"Технически сигнал #{r['id']}",
+                                    use_container_width=True,
+                                )
+    
+                                with open(
+                                    issue_photo_path,
+                                    "rb",
+                                ) as issue_file:
+                                    st.download_button(
+                                        "📥 Изтегли снимката",
+                                        data=issue_file.read(),
+                                        file_name=issue_photo_path.name,
+                                        key=f"download_issue_{r['id']}",
+                                        use_container_width=True,
+                                    )
+    
+                            else:
+                                st.info(
+                                    f"Прикачен файл: "
+                                    f"{issue_photo_path.name}"
+                                )
+    
+                        else:
+                            st.warning(
+                                "Към сигнала има записана снимка, "
+                                "но файлът вече не е наличен на сървъра."
+                            )
+    
                     else:
-                        st.session_state.admin_flash = f"Потвърдено: сигнал #{r['id']} е със статус „{new}“."
-                    st.rerun()
+                        st.caption(
+                            "Към този технически сигнал няма приложена снимка."
+                        )
+    
+                    status_options = [
+                        "Ново",
+                        "В работа",
+                        "Решено",
+                    ]
+    
+                    current_status = (
+                        r["status"]
+                        if r["status"] in status_options
+                        else "Ново"
+                    )
+    
+                    new = st.selectbox(
+                        "Статус",
+                        status_options,
+                        index=status_options.index(current_status),
+                        key=f"is_{r['id']}",
+                    )
+    
+                    if st.button(
+                        "Обнови",
+                        key=f"iu_{r['id']}",
+                        use_container_width=True,
+                    ):
+    
+                        execute(
+                            """
+                            UPDATE technical_issues
+                            SET status=%s
+                            WHERE id=%s
+                            """,
+                            (
+                                new,
+                                r["id"],
+                            ),
+                        )
+    
+                        if new == "Решено":
+                            st.session_state.admin_flash = (
+                                f"Потвърдено: сигнал #{r['id']} "
+                                "е решен и преместен в Архив."
+                            )
+                        else:
+                            st.session_state.admin_flash = (
+                                f"Потвърдено: сигнал #{r['id']} "
+                                f"е със статус „{new}“."
+                            )
+    
+                        st.rerun()
     elif page == "Видео съдържание":
         with st.form("videos"):
             urls = [st.text_input(f"Видео {i}", value=setting(f"youtube_{i}")) for i in range(1,4)]
