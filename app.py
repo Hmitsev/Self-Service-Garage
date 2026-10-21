@@ -680,56 +680,103 @@ def technical_issue(user_id):
 
     st.subheader("Технически проблем")
 
-    with st.form("issue_form"):
+    category = st.selectbox(
+        "Категория",
+        [
+            "Подемник",
+            "Инструменти",
+            "Врата / smart lock",
+            "Осветление",
+            "Друго",
+        ],
+        key="issue_category",
+    )
 
-        category = st.selectbox(
-            "Категория",
-            [
-                "Подемник",
-                "Инструменти",
-                "Врата / smart lock",
-                "Осветление",
-                "Друго",
-            ],
+    description = st.text_area(
+        "Опиши проблема *",
+        key="issue_description",
+    )
+
+    add_photo = st.checkbox(
+        "📷 Добави снимка към сигнала",
+        key="issue_add_photo",
+    )
+
+    photo = None
+
+    if add_photo:
+        photo_source = st.radio(
+            "Как желаете да добавите снимката?",
+            ["Снимай с камера", "Качи готова снимка"],
+            horizontal=True,
+            key="issue_photo_source",
         )
 
-        description = st.text_area(
-            "Опиши проблема *"
-        )
-
-        add_photo = st.toggle(
-            "📷 Добави снимка към сигнала"
-        )
-
-        photo = None
-
-        if add_photo:
+        if photo_source == "Снимай с камера":
             photo = st.camera_input(
-                "Снимай проблема"
+                "Снимай проблема",
+                key="issue_camera",
+            )
+        else:
+            photo = st.file_uploader(
+                "Качи снимка на проблема",
+                type=["jpg", "jpeg", "png", "webp"],
+                key="issue_upload",
             )
 
-        submit = st.form_submit_button(
-            "Изпрати сигнал",
-            use_container_width=True,
-        )
-
-    if submit:
+    if st.button(
+        "Изпрати сигнал",
+        key="submit_issue",
+        use_container_width=True,
+        type="primary",
+    ):
 
         if not description.strip():
-            st.error("Добави описание.")
+            st.error("Добави описание на проблема.")
+            return
 
-        else:
-            execute(
-                "INSERT INTO technical_issues(user_id,category,description,photo) VALUES(%s,%s,%s,%s)",
-                (
-                    user_id,
-                    category,
-                    description.strip(),
-                    save_upload(photo, DOC_DIR, "issue"),
-                ),
+        photo_path = None
+
+        if photo:
+            photo_path = save_upload(
+                photo,
+                DOC_DIR,
+                "issue",
             )
 
-            st.success("Сигналът е изпратен.")
+        execute(
+            """
+            INSERT INTO technical_issues(
+                user_id,
+                category,
+                description,
+                photo
+            )
+            VALUES(%s,%s,%s,%s)
+            """,
+            (
+                user_id,
+                category,
+                description.strip(),
+                photo_path,
+            ),
+        )
+
+        st.session_state.client_flash = (
+            "Техническият сигнал е изпратен успешно."
+        )
+
+        for key in [
+            "issue_description",
+            "issue_add_photo",
+            "issue_photo_source",
+            "issue_camera",
+            "issue_upload",
+        ]:
+            st.session_state.pop(key, None)
+
+        st.rerun()
+
 
 def client_panel():
     user = fetchone("SELECT * FROM users WHERE id=%s", (st.session_state.user_id,))
@@ -956,6 +1003,35 @@ def admin_panel():
         for r in rows:
             with st.expander(f"#{r['id']} • {r['category']} • {r['first_name']} {r['last_name']} • {r['status']}"):
                 st.write(r["description"])
+        if r.get("photo"):
+
+            issue_photo_path = Path(r["photo"])
+
+            if issue_photo_path.exists():
+
+                st.markdown("**Снимка към сигнала:**")
+
+                st.image(
+                    str(issue_photo_path),
+                    caption=f"Технически сигнал #{r['id']}",
+                    use_container_width=True,
+                )
+
+                with open(issue_photo_path, "rb") as issue_file:
+                    st.download_button(
+                        "📥 Изтегли снимката",
+                        data=issue_file.read(),
+                        file_name=issue_photo_path.name,
+                        mime="image/jpeg",
+                        key=f"download_issue_{r['id']}",
+                        use_container_width=True,
+                    )
+
+            else:
+                st.warning(
+                    "Към сигнала има записана снимка, "
+                    "но файлът не е наличен на сървъра."
+                )
                 status_options = ["Ново", "В работа", "Решено"]
                 new = st.selectbox(
                     "Статус",
