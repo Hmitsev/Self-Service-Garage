@@ -814,6 +814,28 @@ def admin_reservations():
             st.write(f"**Телефон:** {r['phone']}"); st.write("**Части:**","Да" if r["wants_parts"] else "Не")
             if r["wants_parts"]:
                 st.write("**VIN:**",r["vin"] or "—"); st.write("**Заявка:**",r["parts_comment"] or "—")
+            if r.get("registration_doc"):
+
+                st.write("**Талон:**")
+            
+                file_path = Path(r["registration_doc"])
+            
+                if file_path.exists():
+            
+                    suffix = file_path.suffix.lower()
+            
+                    if suffix in [".jpg", ".jpeg", ".png", ".webp"]:
+            
+                        st.image(
+                            str(file_path),
+                            use_container_width=True,
+                        )
+            
+                    elif suffix == ".pdf":
+            
+                        st.info(
+                            f"Прикачен PDF: {file_path.name}"
+                        )   
             if r.get("customer_parts_decision"):
                 st.success(f"Решение на клиента: {r['customer_parts_decision']}")
                 st.write("**Избор/коментар:**",r.get("customer_parts_comment") or "—")
