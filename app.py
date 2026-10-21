@@ -449,7 +449,38 @@ def new_reservation(user_id):
         if reservation_dt < datetime.now() + timedelta(days=1):
             st.error("За заявка с части избери период поне 1 ден напред.")
             valid_parts = False
-        parts_comment = st.text_area("Какви части желаете? *")
+        parts_selected = st.multiselect(
+            "Изберете желаните части *",
+            [
+                "Дискове",
+                "Накладки",
+                "Масло",
+                "Филтър Маслен",
+                "Филтър Горивен",
+                "Филтър Въздушен",
+                "Филтър Кабинен",
+                "Течност",
+                "Акумулатор",
+                "Гуми",
+                "Друго",
+            ],
+        )
+        
+        parts_comment = st.text_area(
+            "Допълнителни уточнения",
+            placeholder=(
+                "Пример:\n"
+                "Масло 5W40\n"
+                "Антифриз G12\n"
+                "Гуми 225/45/R17\n"
+                "Други специфични части..."
+            ),
+        )
+        
+        parts_comment = (
+            ", ".join(parts_selected)
+            + ("\n" + parts_comment.strip() if parts_comment.strip() else "")
+        )
         vin = st.text_input(
             "Номер на рама (VIN)",
             max_chars=17,
