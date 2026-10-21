@@ -453,23 +453,40 @@ def new_reservation(user_id):
             st.error("За заявка с части избери период поне 1 ден напред.")
             valid_parts = False
     
-        parts_selected = st.multiselect(
-            "Изберете желаните части *",
-            [
-                "Дискове",
-                "Накладки",
-                "Масло",
-                "Филтър Маслен",
-                "Филтър Горивен",
-                "Филтър Въздушен",
-                "Филтър Кабинен",
-                "Течност",
-                "Акумулатор",
-                "Гуми",
-                "Друго",
-            ],
-            placeholder="Маркирайте една или повече части...",
-        )
+        st.markdown("### Изберете желаните части")
+    
+        if st.checkbox("Дискове"):
+            parts_selected.append("Дискове")
+    
+        if st.checkbox("Накладки"):
+            parts_selected.append("Накладки")
+    
+        if st.checkbox("Масло"):
+            parts_selected.append("Масло")
+    
+        if st.checkbox("Филтър Маслен"):
+            parts_selected.append("Филтър Маслен")
+    
+        if st.checkbox("Филтър Горивен"):
+            parts_selected.append("Филтър Горивен")
+    
+        if st.checkbox("Филтър Въздушен"):
+            parts_selected.append("Филтър Въздушен")
+    
+        if st.checkbox("Филтър Кабинен"):
+            parts_selected.append("Филтър Кабинен")
+    
+        if st.checkbox("Течност"):
+            parts_selected.append("Течност")
+    
+        if st.checkbox("Акумулатор"):
+            parts_selected.append("Акумулатор")
+    
+        if st.checkbox("Гуми"):
+            parts_selected.append("Гуми")
+    
+        if st.checkbox("Друго"):
+            parts_selected.append("Друго")
     
         parts_details = st.text_area(
             "Допълнителни уточнения",
