@@ -12,6 +12,8 @@ from psycopg2.extras import RealDictCursor
 from psycopg2.pool import ThreadedConnectionPool
 import streamlit as st
 import time
+import secrets
+from decimal import Decimal
 
 APP_DIR = Path(__file__).parent
 DATA_DIR = APP_DIR / "data"
@@ -33,38 +35,72 @@ if not DATABASE_URL:
 
 @st.cache_resource
 def get_pool():
-    return ThreadedConnectionPool(1, 8, dsn=DATABASE_URL, sslmode="require")
+    return ThreadedConnectionPool(
+        1, 8, dsn=DATABASE_URL, sslmode="require", connect_timeout=10,
+        keepalives=1, keepalives_idle=30, keepalives_interval=10,
+        keepalives_count=5, application_name="garage_manager",
+    )
 
 @contextmanager
 def db():
-    pool = get_pool()
-    conn = pool.getconn()
+    db_pool = get_pool()
+    conn = None
+    broken = False
     try:
+        conn = db_pool.getconn()
+        if conn.closed:
+            broken = True
+            raise psycopg2.InterfaceError("Получена е затворена PostgreSQL връзка.")
         yield conn
-        conn.commit()
+        if not conn.closed:
+            conn.commit()
+    except (psycopg2.OperationalError, psycopg2.InterfaceError):
+        broken = True
+        if conn is not None and not conn.closed:
+            try: conn.rollback()
+            except Exception: pass
+        raise
     except Exception:
-        conn.rollback()
+        if conn is not None and not conn.closed:
+            try: conn.rollback()
+            except Exception: broken = True
         raise
     finally:
-        pool.putconn(conn)
+        if conn is not None:
+            try: db_pool.putconn(conn, close=broken or bool(conn.closed))
+            except Exception:
+                try: conn.close()
+                except Exception: pass
 
 def fetchone(query, params=()):
-    with db() as conn:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(query, params)
-            return cur.fetchone()
+    for attempt in range(2):
+        try:
+            with db() as conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute(query, params); return cur.fetchone()
+        except (psycopg2.OperationalError, psycopg2.InterfaceError):
+            if attempt == 1: raise
+            st.cache_resource.clear()
 
 def fetchall(query, params=()):
-    with db() as conn:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(query, params)
-            return cur.fetchall()
+    for attempt in range(2):
+        try:
+            with db() as conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute(query, params); return cur.fetchall()
+        except (psycopg2.OperationalError, psycopg2.InterfaceError):
+            if attempt == 1: raise
+            st.cache_resource.clear()
 
 def execute(query, params=(), returning=False):
-    with db() as conn:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(query, params)
-            return cur.fetchone() if returning else None
+    for attempt in range(2):
+        try:
+            with db() as conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute(query, params); return cur.fetchone() if returning else None
+        except (psycopg2.OperationalError, psycopg2.InterfaceError):
+            if attempt == 1: raise
+            st.cache_resource.clear()
 
 def hash_value(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
@@ -91,9 +127,24 @@ def init_db():
         )""",
         """CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)""",
         "ALTER TABLE reservations ADD COLUMN IF NOT EXISTS parts_offer TEXT",
+        "ALTER TABLE reservations ADD COLUMN IF NOT EXISTS parts_offer_file TEXT",
         "ALTER TABLE reservations ADD COLUMN IF NOT EXISTS customer_parts_decision TEXT",
         "ALTER TABLE reservations ADD COLUMN IF NOT EXISTS customer_parts_comment TEXT",
         "ALTER TABLE reservations ADD COLUMN IF NOT EXISTS customer_parts_responded_at TIMESTAMPTZ",
+        "ALTER TABLE reservations ADD COLUMN IF NOT EXISTS final_amount NUMERIC(12,2)",
+        "ALTER TABLE reservations ADD COLUMN IF NOT EXISTS payment_status TEXT NOT NULL DEFAULT 'unpaid'",
+        "ALTER TABLE reservations ADD COLUMN IF NOT EXISTS payment_method TEXT",
+        "ALTER TABLE reservations ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ",
+        "ALTER TABLE reservations ADD COLUMN IF NOT EXISTS test_payment BOOLEAN NOT NULL DEFAULT FALSE",
+        """CREATE TABLE IF NOT EXISTS login_sessions(
+            id BIGSERIAL PRIMARY KEY, user_id BIGINT REFERENCES users(id) ON DELETE CASCADE,
+            role TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE,
+            last_seen TIMESTAMPTZ NOT NULL DEFAULT NOW(), created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())""",
+        "CREATE INDEX IF NOT EXISTS idx_garage_sessions_token ON login_sessions(token_hash,last_seen)",
+        """CREATE TABLE IF NOT EXISTS expenses(
+            id BIGSERIAL PRIMARY KEY, expense_date DATE NOT NULL DEFAULT CURRENT_DATE,
+            category TEXT NOT NULL, amount NUMERIC(12,2) NOT NULL CHECK(amount > 0),
+            description TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())""",
         "CREATE INDEX IF NOT EXISTS idx_reservation_day ON reservations(reservation_date, start_time)",
         "CREATE INDEX IF NOT EXISTS idx_reservation_user ON reservations(user_id)",
     ]
@@ -220,6 +271,33 @@ def day_slots(selected_date):
         current = slot_end
     return slots
 
+def session_hash(token):
+    return hash_value(token)
+
+def create_login_session(role, user_id=None):
+    token = secrets.token_urlsafe(32)
+    execute("INSERT INTO login_sessions(user_id,role,token_hash,last_seen) VALUES(%s,%s,%s,NOW())", (user_id,role,session_hash(token)))
+    st.session_state.role = role
+    if user_id: st.session_state.user_id = user_id
+    st.session_state.login_token = token
+    st.query_params["session"] = token
+
+def restore_login_session():
+    token = st.session_state.get("login_token") or st.query_params.get("session")
+    if not token: return False
+    row = fetchone("SELECT * FROM login_sessions WHERE token_hash=%s AND last_seen >= NOW()-INTERVAL '7 days'", (session_hash(token),))
+    if not row:
+        st.query_params.pop("session",None); return False
+    execute("UPDATE login_sessions SET last_seen=NOW() WHERE id=%s",(row["id"],))
+    st.session_state.login_token=token; st.session_state.role=row["role"]
+    if row.get("user_id"): st.session_state.user_id=row["user_id"]
+    return True
+
+def logout():
+    token=st.session_state.get("login_token") or st.query_params.get("session")
+    if token: execute("DELETE FROM login_sessions WHERE token_hash=%s",(session_hash(token),))
+    st.session_state.clear(); st.query_params.clear(); st.rerun()
+
 def register_view():
     st.subheader("Бърза регистрация")
     with st.form("register_form"):
@@ -250,7 +328,7 @@ def register_view():
                 hash_value(password),
                 None
             ), True)
-            st.session_state.user_id = row["id"]; st.session_state.role = "client"; st.rerun()
+            create_login_session("client",row["id"]); st.rerun()
 
 def login_view():
 
@@ -286,8 +364,7 @@ def login_view():
 
             if user and user["password_hash"] == hash_value(password):
 
-                st.session_state.user_id = user["id"]
-                st.session_state.role = "client"
+                create_login_session("client",user["id"])
                 st.rerun()
 
             st.error("Невалиден телефон или парола.")
@@ -310,7 +387,7 @@ def login_view():
 
             if hash_value(pin) == setting("admin_pin_hash"):
 
-                st.session_state.role = "admin"
+                create_login_session("admin")
                 st.rerun()
 
             st.error("Невалиден администраторски PIN.")
@@ -445,7 +522,7 @@ def parts_order_builder():
 
 
 def autodoc_help():
-    st.markdown("##  Помощ от AUTODOC")
+    st.markdown("## Помощ от AUTODOC")
     st.caption("Изберете категория. Администраторът определя видеото, което се показва във всяка секция.")
     categories = [
         ("Смяна на масло", "help_oil"), ("Смяна на филтри", "help_filters"),
@@ -567,8 +644,24 @@ def history(user_id):
             st.write("**Заявка за части:**","Да" if r["wants_parts"] else "Не")
             if r["parts_status"]: st.write("**Статус части:**",r["parts_status"])
             if r.get("parts_offer"): st.info(r["parts_offer"])
+            if r.get("parts_offer_file"):
+                offer_path=Path(r["parts_offer_file"])
+                if offer_path.exists():
+                    if offer_path.suffix.lower() in [".jpg",".jpeg",".png",".webp"]: st.image(str(offer_path),use_container_width=True)
+                    with open(offer_path,"rb") as offer_file:
+                        st.download_button("⬇️ Отвори / изтегли офертата",offer_file.read(),offer_path.name,"application/pdf" if offer_path.suffix.lower()==".pdf" else "application/octet-stream",key=f"offer_download_{r['id']}",use_container_width=True)
             if r["admin_note"]: st.write("**Съобщение от сервиза:**",r["admin_note"])
             if r["door_pin"]: st.success(f"PIN за вход: {r['door_pin']}")
+            if r["status"] == "Завършена" and r.get("final_amount") is not None:
+                st.markdown(f"### Дължима сума: {float(r['final_amount']):.2f} €")
+                if r.get("payment_status") == "paid":
+                    st.success(f"✅ Платено с карта (тестов режим) · {r.get('paid_at'):%d.%m.%Y %H:%M}" if r.get('paid_at') else "✅ Платено с карта (тестов режим)")
+                else:
+                    st.warning("ТЕСТОВО ПЛАЩАНЕ: няма да бъде изтеглена реална сума от карта.")
+                    if st.button("💳 Плати с карта",key=f"pay_res_{r['id']}",use_container_width=True,type="primary"):
+                        execute("UPDATE reservations SET payment_status='paid',payment_method='card',paid_at=NOW(),test_payment=TRUE WHERE id=%s AND user_id=%s AND status='Завършена'",(r["id"],user_id))
+                        st.session_state.client_flash=f"Тестовото картово плащане за резервация #{r['id']} е отчетено успешно."
+                        st.rerun()
             if r.get("customer_parts_decision"):
                 st.write("**Вашето решение:**",r["customer_parts_decision"])
                 if r.get("customer_parts_comment"): st.write("**Вашият избор:**",r["customer_parts_comment"])
@@ -754,8 +847,7 @@ def client_panel():
             st.session_state.client_page = "Моят профил"
             st.rerun()
         if st.button("Изход", use_container_width=True):
-            st.session_state.clear()
-            st.rerun()
+            logout()
 
     if st.session_state.get("client_flash"):
         st.success(st.session_state.pop("client_flash"))
@@ -826,13 +918,21 @@ def admin_reservations():
             cur=r["parts_status"] if r["parts_status"] in part_statuses else "—"
             ps=c2.selectbox("Статус части",part_statuses,index=part_statuses.index(cur),key=f"p_{r['id']}")
             offer=st.text_area("Предложение за части",value=r.get("parts_offer") or "",placeholder="Диск 1 – 50 евро\nДиск 2 – 40 евро",key=f"off_{r['id']}",disabled=not r["wants_parts"])
+            offer_upload=st.file_uploader("📎 Качи оферта (PDF или снимка)",type=["pdf","jpg","jpeg","png","webp"],key=f"offer_file_{r['id']}",disabled=not r["wants_parts"])
+            if r.get("parts_offer_file"): st.caption(f"Текущ файл: {Path(r['parts_offer_file']).name}")
             note=st.text_area("Съобщение към клиента",value=r["admin_note"] or "",key=f"n_{r['id']}")
             pin=st.text_input("PIN",value=r["door_pin"] or "",key=f"pin_{r['id']}")
+            final_amount=st.number_input("Крайна сума за плащане (€)",min_value=0.0,max_value=100000.0,value=float(r.get("final_amount") or 0),step=0.01,key=f"amount_{r['id']}")
             if st.button("Запази промените",key=f"save_{r['id']}",use_container_width=True):
-                if ps=="Можем да подготвим" and not offer.strip(): st.error("Добавете предложение за части.")
+                if ps=="Можем да подготвим" and not (offer.strip() or offer_upload or r.get("parts_offer_file")): st.error("Добавете текст или PDF/снимка с офертата.")
                 else:
-                    execute("UPDATE reservations SET status=%s,parts_status=%s,parts_offer=%s,admin_note=%s,door_pin=%s WHERE id=%s",
-                            (ns,None if ps=="—" else ps,offer.strip() or None,note.strip() or None,pin.strip() or None,r["id"]))
+                    
+                    if ns=="Завършена" and final_amount <= 0:
+                        st.error("Преди финализиране въведете крайна сума за плащане."); return
+                    offer_file_path=r.get("parts_offer_file")
+                    if offer_upload is not None: offer_file_path=save_upload(offer_upload,DOC_DIR,f"offer_{r['id']}")
+                    execute("UPDATE reservations SET status=%s,parts_status=%s,parts_offer=%s,parts_offer_file=%s,admin_note=%s,door_pin=%s,final_amount=%s WHERE id=%s",
+                            (ns,None if ps=="—" else ps,offer.strip() or None,offer_file_path,note.strip() or None,pin.strip() or None,final_amount if final_amount>0 else None,r["id"]))
                     st.session_state.admin_flash = (
                         f"Потвърдено: резервация #{r['id']} е обновена. "
                         f"Статус: {ns}. Статус части: {ps}."
@@ -880,30 +980,39 @@ def admin_statistics():
     daily=fetchall("SELECT reservation_date,COUNT(*) total FROM reservations WHERE reservation_date BETWEEN %s AND %s GROUP BY reservation_date ORDER BY reservation_date",(d1,d2))
     if daily: st.line_chart({r["reservation_date"].isoformat():int(r["total"]) for r in daily})
 
+def admin_finance():
+    st.subheader("💰 Финанси")
+    paid=fetchone("SELECT COALESCE(SUM(final_amount),0) total FROM reservations WHERE payment_status='paid'")["total"]
+    due=fetchone("SELECT COALESCE(SUM(final_amount),0) total FROM reservations WHERE status='Завършена' AND payment_status<>'paid'")["total"]
+    spent=fetchone("SELECT COALESCE(SUM(amount),0) total FROM expenses")["total"]
+    c1,c2,c3,c4=st.columns(4)
+    c1.metric("Платени заявки",f"{float(paid):.2f} €"); c2.metric("Очаквани плащания",f"{float(due):.2f} €")
+    c3.metric("Разходи",f"{float(spent):.2f} €"); c4.metric("Нетно",f"{float(paid)-float(spent):.2f} €")
+    st.caption("Плащанията с карта в момента са тестови и се отчитат като получени, без реална банкова транзакция.")
+    with st.form("garage_expense",clear_on_submit=True):
+        d=st.date_input("Дата",date.today()); cat=st.selectbox("Категория",["Инструменти","Консумативи","Ток","Вода","Други"])
+        amount=st.number_input("Сума (€)",min_value=0.0,max_value=100000.0,value=0.0,step=0.01); desc=st.text_area("Описание")
+        save=st.form_submit_button("Добави разход",use_container_width=True)
+    if save:
+        if amount<=0: st.error("Сумата трябва да бъде по-голяма от 0.")
+        else:
+            execute("INSERT INTO expenses(expense_date,category,amount,description) VALUES(%s,%s,%s,%s)",(d,cat,amount,desc.strip() or None)); st.rerun()
+    st.markdown("### Последни движения")
+    for r in fetchall("SELECT * FROM expenses ORDER BY expense_date DESC,id DESC LIMIT 100"):
+        with st.container(border=True): st.write(f"**{r['expense_date']:%d.%m.%Y} · {r['category']} · {float(r['amount']):.2f} €**"); st.caption(r.get('description') or "Без описание")
+
 def admin_panel():
-    # Browser timer triggers a rerun every 240000 ms (4 minutes).
-    st.components.v1.html(
-        """
-        <script>
-        setTimeout(function() {
-            window.parent.location.reload();
-        }, 240000);
-        </script>
-        """,
-        height=0,
-    )
 
     st.subheader("Административен панел")
 
     with st.sidebar:
         page = st.radio(
             "Админ меню",
-            ["Табло", "Резервации", "Архив", "Статистика", "Технически сигнали", "Видео съдържание", "Помощ AUTODOC", "Настройки"],
+            ["Табло", "Резервации", "Архив", "Статистика", "Технически сигнали", "Видео съдържание", "Помощ AUTODOC", "Финанси", "Настройки"],
         )
-        st.caption("🔄 Автоматично обновяване на всеки 4 минути")
+        st.caption("🔒 Стабилна сесия: входът се пази до 7 дни")
         if st.button("Изход"):
-            st.session_state.clear()
-            st.rerun()
+            logout()
 
     if st.session_state.get("admin_flash"):
         st.success(st.session_state.pop("admin_flash"))
@@ -1064,6 +1173,8 @@ def admin_panel():
                 for i,url in enumerate(urls,1):
                     set_setting(f"youtube_{i}",url.strip())
                 st.success("Потвърдено: видеата са обновени.")
+    elif page == "Финанси":
+        admin_finance()
     elif page == "Помощ AUTODOC":
         st.subheader("Видео помощ и линкове към AUTODOC")
         fields = [
