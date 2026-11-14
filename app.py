@@ -445,7 +445,7 @@ def parts_order_builder():
 
 
 def autodoc_help():
-    st.markdown("## 🐶 Помощ от AUTODOC")
+    st.markdown("##  Помощ от AUTODOC")
     st.caption("Изберете категория. Администраторът определя видеото, което се показва във всяка секция.")
     categories = [
         ("Смяна на масло", "help_oil"), ("Смяна на филтри", "help_filters"),
