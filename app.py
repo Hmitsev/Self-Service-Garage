@@ -103,6 +103,9 @@ def init_db():
                 cur.execute(statement)
             defaults = {
                 "youtube_1": "", "youtube_2": "", "youtube_3": "",
+                "help_oil": "", "help_filters": "", "help_brakes": "",
+                "help_interior": "", "help_exterior": "", "help_spark_plugs": "",
+                "autodoc_channel": "", "autodoc_parts": "",
                 "slot_minutes": "60", "open_hour": "09:00", "close_hour": "18:00",
                 "admin_pin_hash": hash_value(os.getenv("ADMIN_PIN", "2468")),
             }
@@ -359,284 +362,198 @@ def video_section():
                 st.info("Видеото ще бъде добавено от администратора.")
                 st.caption(video["description"])
 
+PART_BRANDS_BRAKES = ["ABE", "ATE", "BLUE PRINT", "BOSCH", "BRECK", "BREMBO", "DBA", "DELPHI", "FEBI", "FERODO", "FTE", "HERTH+BUSS JAKOPARTS", "JURID", "LPR", "MEYLE", "TEXTAR", "TRW", "VALEO", "ОЕ (оригинален продукт)", "Друго"]
+PART_BRANDS_FILTERS = ["BLUE PRINT", "BOSCH", "FEBI", "FILTRON", "HANS PRIES", "HENGST", "HERTH+BUSS JAKOPARTS", "KNECHT", "MAGNETI MARELLI", "MANN-FILTER", "PURFLUX", "PURRO", "SOFIMA", "VAICO", "ОЕ (оригинален продукт)", "Друго"]
+OIL_BRANDS = ["CASTROL", "CHEMPIOIL", "CHEMPIOIL MOTO", "COMMA", "ELF", "FEBI", "FUCHS OIL", "LIQUI MOLY", "MOBIL", "MOTUL", "RAVENOL", "REVLINE", "REVLINE MOTO", "VALVOLINE", "ZF", "ОЕ (оригинален продукт)", "Друго"]
+OIL_SPECS = ["0W12", "0W16", "0W20", "0W30", "0W40", "0W8", "10W", "10W30", "10W40", "10W50", "10W60", "15W30", "15W40", "15W50", "15W60", "20W20", "20W40", "20W50", "20W60", "25W40", "5W16", "5W20", "5W30", "5W40", "5W50", "75W80", "75W90", "Друга / по спецификация на автомобила"]
+BATTERY_BRANDS = ["4 RIDE", "4MAX", "BOSCH", "CARTECHNIC", "EXIDE", "FURYA", "VARTA", "YUASA", "ОЕ (оригинален продукт)", "Друго"]
+FLUID_TYPES = ["Спирачна течност", "Антифриз", "Течност за чистачки", "AdBlue", "Добавка", "Почистващ агент", "Зимна химия", "Проникващ спрей", "Каша за ръце", "Обезмаслител", "Лепило", "Друга химия"]
+
+
+def quantity_input(key):
+    return st.number_input("Брой / количество", min_value=1, max_value=50, value=1, step=1, key=key)
+
+
+def parts_order_builder():
+    st.markdown("### Поръчка на части")
+    st.caption("Отворете желаната категория, попълнете вариантите и натиснете „Добави в поръчката“.")
+    selected = []
+
+    def add_line(title, details, qty):
+        selected.append(f"{title}: {details}; количество: {int(qty)}")
+        st.success(f"Добавено: {title}")
+
+    for title, axle_key in [("Дискове", "discs"), ("Накладки", "pads")]:
+        with st.expander(title):
+            axle = st.selectbox("Позиция", ["Предни", "Задни", "Предни и задни"], key=f"{axle_key}_axle")
+            brands = st.multiselect("Желани марки за оферта", PART_BRANDS_BRAKES, key=f"{axle_key}_brands")
+            comment = st.text_input("Коментар", key=f"{axle_key}_comment")
+            qty = quantity_input(f"{axle_key}_qty")
+            if st.checkbox("Добави в поръчката", key=f"{axle_key}_add"):
+                add_line(title, f"{axle}; марки: {', '.join(brands) or 'без предпочитание'}; {comment or 'без коментар'}", qty)
+
+    for title, key in [("Маслен филтър", "oil_filter"), ("Горивен филтър", "fuel_filter"), ("Въздушен филтър", "air_filter"), ("Кабинен филтър", "cabin_filter")]:
+        with st.expander(title):
+            brands = st.multiselect("Желани марки за оферта", PART_BRANDS_FILTERS, key=f"{key}_brands")
+            comment = st.text_input("Коментар", key=f"{key}_comment")
+            qty = quantity_input(f"{key}_qty")
+            if st.checkbox("Добави в поръчката", key=f"{key}_add"):
+                add_line(title, f"марки: {', '.join(brands) or 'без предпочитание'}; {comment or 'без коментар'}", qty)
+
+    with st.expander("Масло"):
+        brands = st.multiselect("Желани марки за оферта", OIL_BRANDS, key="oil_brands")
+        spec = st.selectbox("Вискозитет / спецификация", OIL_SPECS, key="oil_spec")
+        pack = st.selectbox("Предпочитана разфасовка", ["1 л", "4 л", "5 л", "20 л", "Друга"], key="oil_pack")
+        litres = st.number_input("Необходимо количество в литри", min_value=0.5, max_value=100.0, value=5.0, step=0.5, key="oil_litres")
+        comment = st.text_area("Коментар за маслото", key="oil_comment")
+        qty = quantity_input("oil_qty")
+        if st.checkbox("Добави в поръчката", key="oil_add"):
+            add_line("Масло", f"марки: {', '.join(brands) or 'без предпочитание'}; {spec}; разфасовка {pack}; общо {litres:g} л; {comment or 'без коментар'}", qty)
+
+    with st.expander("Течност / автохимия"):
+        fluid = st.selectbox("Вид течност", FLUID_TYPES, key="fluid_type")
+        pack = st.selectbox("Разфасовка", ["до 2 л", "до 5 л"], key="fluid_pack")
+        oe = st.checkbox("ОЕ (оригинален продукт)", key="fluid_oe")
+        comment = st.text_input("Коментар", key="fluid_comment")
+        qty = quantity_input("fluid_qty")
+        if st.checkbox("Добави в поръчката", key="fluid_add"):
+            add_line("Течност", f"{fluid}; {pack}; {'ОЕ' if oe else 'aftermarket'}; {comment or 'без коментар'}", qty)
+
+    with st.expander("Акумулатор"):
+        brands = st.multiselect("Желани марки за оферта", BATTERY_BRANDS, key="battery_brands")
+        capacity = st.number_input("Капацитет (Ah)", min_value=20.0, max_value=250.0, value=62.0, step=1.0, key="battery_capacity")
+        comment = st.text_input("Допълнителни данни / размери / стартов ток", key="battery_comment")
+        qty = quantity_input("battery_qty")
+        if st.checkbox("Добави в поръчката", key="battery_add"):
+            add_line("Акумулатор", f"марки: {', '.join(brands) or 'без предпочитание'}; {capacity:g} Ah; {comment or 'без коментар'}", qty)
+
+    with st.expander("Гуми"):
+        brand = st.text_input("Желана марка (може няколко, разделени със запетая)", key="tyre_brand")
+        size = st.text_input("Размер", placeholder="Например 225/45 R17", key="tyre_size")
+        oe = st.checkbox("ОЕ / оригинално вграждане", key="tyre_oe")
+        qty = quantity_input("tyre_qty")
+        if st.checkbox("Добави в поръчката", key="tyre_add"):
+            add_line("Гуми", f"марки: {brand or 'без предпочитание'}; размер: {size or 'неуточнен'}; {'ОЕ' if oe else 'aftermarket'}", qty)
+
+    with st.expander("Друго"):
+        details = st.text_area("Опишете частта", key="other_part_details")
+        oe = st.checkbox("ОЕ (оригинален продукт)", key="other_part_oe")
+        qty = quantity_input("other_part_qty")
+        if st.checkbox("Добави в поръчката", key="other_part_add"):
+            add_line("Друго", f"{details or 'без описание'}; {'ОЕ' if oe else 'aftermarket'}", qty)
+    return selected
+
+
+def autodoc_help():
+    st.markdown("## 🐶 Помощ от AUTODOC")
+    st.caption("Изберете категория. Администраторът определя видеото, което се показва във всяка секция.")
+    categories = [
+        ("Смяна на масло", "help_oil"), ("Смяна на филтри", "help_filters"),
+        ("Смяна на дискове и накладки", "help_brakes"), ("Ремонт по интериор", "help_interior"),
+        ("Ремонт по екстериор / купе", "help_exterior"), ("Смяна на свещи", "help_spark_plugs"),
+    ]
+    choice = st.radio("Категория", [x[0] for x in categories], horizontal=True)
+    key = dict(categories)[choice]
+    url = setting(key, "").strip()
+    if url: st.video(url)
+    else: st.info("За тази категория все още няма добавено видео.")
+    st.markdown("### Не намирате подходящата секция?")
+    st.write("Посетете канала на AUTODOC и потърсете конкретен ремонт за вашия автомобил.")
+    channel = setting("autodoc_channel", "").strip()
+    parts = setting("autodoc_parts", "").strip()
+    c1, c2 = st.columns(2)
+    if channel: c1.link_button("▶️ Отвори канала на AUTODOC", channel, use_container_width=True)
+    else: c1.info("Линкът към канала ще бъде добавен от администратора.")
+    if parts: c2.link_button("🛒 Намери части в AUTODOC", parts, use_container_width=True)
+    else: c2.info("Линкът към сайта за части ще бъде добавен от администратора.")
+
 def new_reservation(user_id):
     st.subheader("Визуален календар за резервации")
-    selected = st.date_input(
-        "Избери дата",
-        min_value=date.today(),
-        value=date.today() + timedelta(days=1),
-    )
-
+    selected = st.date_input("Избери дата", min_value=date.today(), value=date.today() + timedelta(days=1))
     slots = day_slots(selected)
-    st.caption("🟢 Свободен час    🔴 Зает час")
-    free_slots = [slot["time"] for slot in slots if not slot["is_busy"]]
-
-    for start_index in range(0, len(slots), 4):
-        for col, slot in zip(st.columns(4), slots[start_index:start_index + 4]):
-            css = "slot-busy" if slot["is_busy"] else "slot-free"
-            label = "ЗАЕТ" if slot["is_busy"] else "СВОБОДЕН"
-            col.markdown(
-                f'<div class="{css}">{slot["time"]}<br>{label}</div>',
-                unsafe_allow_html=True,
-            )
-
-    if not free_slots:
-        st.warning("За избраната дата няма свободни часове.")
-        return
-
     slot_minutes = int(setting("slot_minutes", "60"))
-    start_value = st.selectbox("Начален час", free_slots)
-    start_index = next(i for i, slot in enumerate(slots) if slot["time"] == start_value)
-
-    consecutive_free = 0
-    for slot in slots[start_index:]:
-        if slot["is_busy"]:
-            break
-        consecutive_free += 1
-
-    duration_options = list(range(1, consecutive_free + 1))
-    duration_slots = st.selectbox(
-        "Продължителност",
-        duration_options,
-        format_func=lambda value: f"{value} час" if value == 1 else f"{value} часа",
-    )
-
-    start_dt = datetime.combine(
-        selected,
-        datetime.strptime(start_value, "%H:%M").time(),
-    )
-    end_dt = start_dt + timedelta(minutes=slot_minutes * duration_slots)
-    end_value = end_dt.strftime("%H:%M")
-
-    st.info(
-        f"Избран период: {selected.isoformat()} от {start_value} до {end_value} "
-        f"({duration_slots} {'час' if duration_slots == 1 else 'часа'})"
-    )
-    st.markdown(
-        '<div class="notice">Заявка за части се подава минимум 1 ден предварително.</div>',
-        unsafe_allow_html=True,
-    )
-
-    if st.button("Продължи към потвърждение", type="primary", use_container_width=True):
-        st.session_state.pending_slot = (
-            selected.isoformat(),
-            start_value,
-            end_value,
-            duration_slots,
-        )
-
-    if "pending_slot" not in st.session_state:
-        return
-
-    day_value, pending_start, pending_end, pending_duration = st.session_state.pending_slot
-    st.success(
-        f"Период за потвърждение: {day_value} от {pending_start} до {pending_end} "
-        f"({pending_duration} {'час' if pending_duration == 1 else 'часа'})"
-    )
-
-    wants = st.radio(
-        "Желаете ли да закупите части предварително?",
-        ["Не, само резервация", "Да, желая части"],
-    )
-    parts_comment = vin = doc_path = None
-    parts_selected = []
-    valid_parts = True
-    
-    if wants.startswith("Да"):
-    
-        reservation_dt = datetime.combine(
-            date.fromisoformat(day_value),
-            datetime.strptime(pending_start, "%H:%M").time(),
-        )
-    
-        if reservation_dt < datetime.now() + timedelta(days=1):
-            st.error("За заявка с части избери период поне 1 ден напред.")
-            valid_parts = False
-    
-        st.markdown("### Изберете желаните части")
-    
-        if st.checkbox("Дискове"):
-            parts_selected.append("Дискове")
-    
-        if st.checkbox("Накладки"):
-            parts_selected.append("Накладки")
-    
-        if st.checkbox("Масло"):
-            parts_selected.append("Масло")
-    
-        if st.checkbox("Филтър Маслен"):
-            parts_selected.append("Филтър Маслен")
-    
-        if st.checkbox("Филтър Горивен"):
-            parts_selected.append("Филтър Горивен")
-    
-        if st.checkbox("Филтър Въздушен"):
-            parts_selected.append("Филтър Въздушен")
-    
-        if st.checkbox("Филтър Кабинен"):
-            parts_selected.append("Филтър Кабинен")
-    
-        if st.checkbox("Течност"):
-            parts_selected.append("Течност")
-    
-        if st.checkbox("Акумулатор"):
-            parts_selected.append("Акумулатор")
-    
-        if st.checkbox("Гуми"):
-            parts_selected.append("Гуми")
-    
-        if st.checkbox("Друго"):
-            parts_selected.append("Друго")
-    
-        parts_details = st.text_area(
-            "Допълнителни уточнения",
-            placeholder=(
-                "Пример:\n"
-                "Масло 5W40\n"
-                "Гуми 225/45 R17\n"
-                "Антифриз G12\n"
-                "Други специфични части..."
-            ),
-        )
-    
-        parts_comment = ", ".join(parts_selected)
-    
-        if parts_details.strip():
-            parts_comment += "\n" + parts_details.strip()
-        vin = st.text_input(
-            "Номер на рама (VIN)",
-            max_chars=17,
-            help="Въведете 17-символен VIN или приложете снимка на талона.",
-        ).upper().strip()
-        add_registration_doc = st.checkbox(
-            "📷 Добави снимка на талона"
-        )
-        
-        doc_camera = None
-        doc_upload = None
-        doc_path = None
-        
-        if add_registration_doc:
-        
-            st.info(
-                "Снимайте талона хоризонтално, така че полето (E) с VIN да се вижда ясно."
-            )
-        
-            document_source = st.radio(
-                "Как желаете да добавите талона?",
-                ["Снимай с камера", "Качи готов файл"],
-                horizontal=True,
-                key="registration_document_source",
-            )
-        
-            if document_source == "Снимай с камера":
-        
-                st.image(
-                    APP_DIR / "vin_example.jpg",
-                    caption="Пример как трябва да бъде сниман талонът",
-                    use_container_width=True,
-                )
-        
-                doc_camera = st.camera_input(
-                    "Снимай талона",
-                    key="registration_doc_camera",
-                )
-        
+    if st.session_state.get("slot_day") != selected.isoformat():
+        st.session_state.slot_day = selected.isoformat()
+        st.session_state.slot_start_index = None
+        st.session_state.slot_end_index = None
+        st.session_state.pop("pending_slot", None)
+    a = st.session_state.get("slot_start_index")
+    b = st.session_state.get("slot_end_index")
+    selected_indexes = set(range(a, b + 1)) if a is not None and b is not None else set()
+    dynamic_css = ["<style>"]
+    for i, slot in enumerate(slots):
+        if not slot["is_busy"]:
+            dynamic_css.append(f'.st-key-res_slot_{i} button {{background:#14532d !important;border-color:#22c55e !important;color:white !important;min-height:78px !important;}}')
+    for i in selected_indexes:
+        dynamic_css.append(f'.st-key-res_slot_{i} button {{background:#d97706 !important;border-color:#fbbf24 !important;color:white !important;box-shadow:0 0 18px rgba(245,158,11,.55) !important;}}')
+    dynamic_css.append("</style>")
+    st.markdown("".join(dynamic_css), unsafe_allow_html=True)
+    st.caption("🟢 Свободен • 🟠 Избран период • 🔴 Зает. Натиснете първия свободен час, после последния час от периода.")
+    for row_start in range(0, len(slots), 4):
+        for i, (col, slot) in enumerate(zip(st.columns(4), slots[row_start:row_start + 4]), start=row_start):
+            start_time = slot["time"]
+            end_time = (datetime.strptime(start_time, "%H:%M") + timedelta(minutes=slot_minutes)).strftime("%H:%M")
+            if slot["is_busy"]:
+                col.markdown(f'<div class="slot-busy">{start_time}–{end_time}<br>ЗАЕТ</div>', unsafe_allow_html=True)
             else:
-        
-                doc_upload = st.file_uploader(
-                    "Качи снимка или PDF на талона",
-                    type=["jpg", "jpeg", "png", "pdf"],
-                    key="registration_doc_upload",
-                )
-        
-            document_file = doc_camera or doc_upload
-        
-            if document_file:
-        
-                doc_path = save_upload(
-                    document_file,
-                    DOC_DIR,
-                    "talon",
-                )
-        
-                st.success(
-                    "Талонът е приложен успешно."
-                )
-
-    if st.button(
-        "Потвърди и изпрати заявката",
-        use_container_width=True,
-        disabled=not valid_parts,
-    ):
+                label = f"{start_time}–{end_time}\n{'ИЗБРАН' if i in selected_indexes else 'СВОБОДЕН'}"
+                if col.button(label, key=f"res_slot_{i}", use_container_width=True):
+                    if a is None or (a is not None and b is not None and a != b):
+                        st.session_state.slot_start_index = i
+                        st.session_state.slot_end_index = i
+                    else:
+                        lo, hi = sorted((a, i))
+                        if any(slots[x]["is_busy"] for x in range(lo, hi + 1)):
+                            st.error("Периодът преминава през зает час. Изберете друг краен час.")
+                        else:
+                            st.session_state.slot_start_index = lo
+                            st.session_state.slot_end_index = hi
+                    st.session_state.pop("pending_slot", None)
+                    st.rerun()
+    a = st.session_state.get("slot_start_index")
+    b = st.session_state.get("slot_end_index")
+    if a is None or b is None:
+        st.info("Изберете свободен час. За по-дълга резервация натиснете и последния желан часови блок.")
+        return
+    start_value = slots[a]["time"]
+    end_dt = datetime.combine(selected, datetime.strptime(slots[b]["time"], "%H:%M").time()) + timedelta(minutes=slot_minutes)
+    end_value = end_dt.strftime("%H:%M")
+    duration_slots = b - a + 1
+    st.success(f"Избран период: {selected.isoformat()} от {start_value} до {end_value} ({duration_slots * slot_minutes // 60:g} ч.)")
+    if st.button("Продължи към потвърждение", type="primary", use_container_width=True):
+        st.session_state.pending_slot = (selected.isoformat(), start_value, end_value, duration_slots)
+    if "pending_slot" not in st.session_state: return
+    day_value, pending_start, pending_end, pending_duration = st.session_state.pending_slot
+    st.markdown('<div class="notice">Заявка за части се подава минимум 1 ден предварително.</div>', unsafe_allow_html=True)
+    wants = st.radio("Желаете ли да закупите части предварително?", ["Не, само резервация", "Да, желая части"])
+    parts_comment = ""; vin = ""; doc_path = None; valid_parts = True
+    if wants.startswith("Да"):
+        reservation_dt = datetime.combine(date.fromisoformat(day_value), datetime.strptime(pending_start, "%H:%M").time())
+        if reservation_dt < datetime.now() + timedelta(days=1):
+            st.error("За заявка с части изберете период поне 1 ден напред."); valid_parts = False
+        parts_selected = parts_order_builder()
+        parts_comment = "\n".join(parts_selected)
+        vin = st.text_input("Номер на рама (VIN)", max_chars=17, help="Въведете 17-символен VIN или приложете снимка на талона.").upper().strip()
+        add_doc = st.checkbox("📷 Добави снимка на талона")
+        if add_doc:
+            source = st.radio("Как желаете да добавите талона?", ["Снимай с камера", "Качи готов файл"], horizontal=True, key="registration_document_source")
+            document_file = st.camera_input("Снимай талона", key="registration_doc_camera") if source == "Снимай с камера" else st.file_uploader("Качи снимка или PDF", type=["jpg","jpeg","png","pdf"], key="registration_doc_upload")
+            if document_file: doc_path = save_upload(document_file, DOC_DIR, "talon"); st.success("Талонът е приложен успешно.")
+    if st.button("Потвърди и изпрати заявката", use_container_width=True, disabled=not valid_parts):
         wants_parts = wants.startswith("Да")
-
-        if wants_parts and not parts_comment.strip():
-            st.error("Добавете описание на желаните части.")
-            return
-        
-        has_valid_vin = bool(vin) and len(vin) == 17
-        has_registration_document = bool(doc_path)
-        
-        if wants_parts and not has_valid_vin and not has_registration_document:
-            st.error(
-                "Въведете 17-символен VIN или приложете снимка/файл на талона."
-            )
-            return
-        
-        if vin and len(vin) != 17 and not has_registration_document:
-            st.error(
-                "VIN трябва да съдържа точно 17 символа. "
-                "Или приложете снимка/файл на талона."
-            )
-            return
-
+        if wants_parts and not parts_comment.strip(): st.error("Добавете поне един продукт в поръчката."); return
+        if wants_parts and len(vin) != 17 and not doc_path: st.error("Въведете 17-символен VIN или приложете талона."); return
         reservation_date = date.fromisoformat(day_value)
-        start_time_db = datetime.strptime(pending_start, "%H:%M").time()
-        end_time_db = datetime.strptime(pending_end, "%H:%M").time()
-
-        overlap = fetchone(
-            """SELECT id FROM reservations
-               WHERE reservation_date=%s
-                 AND status NOT IN ('Отказана','Анулирана')
-                 AND start_time < %s
-                 AND end_time > %s
-               LIMIT 1""",
-            (reservation_date, end_time_db, start_time_db),
-        )
-        if overlap:
-            st.error("Избраният период вече съдържа зает час. Избери друг период.")
-            st.session_state.pop("pending_slot", None)
-            st.rerun()
-
+        start_time_db = datetime.strptime(pending_start, "%H:%M").time(); end_time_db = datetime.strptime(pending_end, "%H:%M").time()
+        overlap = fetchone("""SELECT id FROM reservations WHERE reservation_date=%s AND status NOT IN ('Отказана','Анулирана') AND start_time < %s AND end_time > %s LIMIT 1""", (reservation_date,end_time_db,start_time_db))
+        if overlap: st.error("Избраният период вече съдържа зает час."); st.session_state.pop("pending_slot",None); return
         try:
-            execute(
-                """INSERT INTO reservations(
-                       user_id,reservation_date,start_time,end_time,wants_parts,
-                       parts_comment,vin,registration_doc,parts_status
-                   ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                (
-                    user_id,
-                    reservation_date,
-                    start_time_db,
-                    end_time_db,
-                    wants_parts,
-                    parts_comment,
-                    vin,
-                    doc_path,
-                    "Очаква преглед" if wants_parts else None,
-                ),
-            )
-            st.session_state.pop("pending_slot", None)
-            st.session_state.client_flash = (
-                f"Потвърдено: резервацията е изпратена за {day_value}, "
-                f"от {pending_start} до {pending_end}."
-            )
+            execute("""INSERT INTO reservations(user_id,reservation_date,start_time,end_time,wants_parts,parts_comment,vin,registration_doc,parts_status) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)""", (user_id,reservation_date,start_time_db,end_time_db,wants_parts,parts_comment,vin,doc_path,"Очаква преглед" if wants_parts else None))
+            for key in ["pending_slot","slot_start_index","slot_end_index"]: st.session_state.pop(key,None)
+            st.session_state.client_flash=f"Потвърдено: резервацията е изпратена за {day_value}, от {pending_start} до {pending_end}."
             st.rerun()
         except IntegrityError:
-            st.error("Началният час току-що е резервиран. Избери друг период.")
-            st.session_state.pop("pending_slot", None)
-            st.rerun()
+            st.error("Началният час току-що е резервиран. Изберете друг период.")
 
 def history(user_id):
     st.subheader("История на резервациите")
@@ -811,11 +728,12 @@ def client_panel():
 
     nav_items = [
         ("🏠 Начало", "Начало"),
+        ("🐶 Помощ от AUTODOC", "Помощ от AUTODOC"),
         ("📅 Запази час", "Запази час"),
         ("🧾 Моите резервации", "Моите резервации"),
         ("🛠 Технически проблем", "Технически проблем"),
     ]
-    nav_columns = st.columns(4)
+    nav_columns = st.columns(5)
     for column, (label, page_name) in zip(nav_columns, nav_items):
         with column:
             if st.button(
@@ -846,6 +764,8 @@ def client_panel():
     st.markdown("---")
     if page == "Начало":
         video_section()
+    elif page == "Помощ от AUTODOC":
+        autodoc_help()
     elif page == "Запази час":
         new_reservation(user["id"])
     elif page == "Моите резервации":
@@ -978,7 +898,7 @@ def admin_panel():
     with st.sidebar:
         page = st.radio(
             "Админ меню",
-            ["Табло", "Резервации", "Архив", "Статистика", "Технически сигнали", "Видео съдържание", "Настройки"],
+            ["Табло", "Резервации", "Архив", "Статистика", "Технически сигнали", "Видео съдържание", "Помощ AUTODOC", "Настройки"],
         )
         st.caption("🔄 Автоматично обновяване на всеки 4 минути")
         if st.button("Изход"):
@@ -1144,6 +1064,19 @@ def admin_panel():
                 for i,url in enumerate(urls,1):
                     set_setting(f"youtube_{i}",url.strip())
                 st.success("Потвърдено: видеата са обновени.")
+    elif page == "Помощ AUTODOC":
+        st.subheader("Видео помощ и линкове към AUTODOC")
+        fields = [
+            ("Смяна на масло", "help_oil"), ("Смяна на филтри", "help_filters"),
+            ("Дискове и накладки", "help_brakes"), ("Ремонт по интериор", "help_interior"),
+            ("Ремонт по екстериор / купе", "help_exterior"), ("Смяна на свещи", "help_spark_plugs"),
+            ("Канал на AUTODOC", "autodoc_channel"), ("Сайт на AUTODOC за части", "autodoc_parts"),
+        ]
+        with st.form("autodoc_help_settings"):
+            values = {key: st.text_input(label, value=setting(key, "")) for label, key in fields}
+            if st.form_submit_button("Запази помощните линкове", use_container_width=True):
+                for key, value in values.items(): set_setting(key, value.strip())
+                st.success("Линковете за помощ са обновени.")
     else:
         with st.form("settings_form"):
             opening = st.text_input("Отваряне", value=setting("open_hour"))
