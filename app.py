@@ -22,6 +22,8 @@ PROFILE_DIR = UPLOAD_DIR / "profiles"
 DOC_DIR = UPLOAD_DIR / "documents"
 CLIENT_BG = APP_DIR / "Designer (25).png"
 ADMIN_BG = APP_DIR / "Designer (26).png"
+AUTODOC_LOGO = APP_DIR / "auto.dog.jpg"
+AUTODOC_PARTS_URL = "https://www.autodoc.bg/?_gl=1*eouckk*_up*MQ..*_gs*MQ..&gclid=Cj0KCQiAh9vXBhDKARIsAMooYhfPS_LiTItsQeNDS0sJyvrEc_2SxL3II1WIqwrIbK1zcTlv00Gl1fMaAiDZEALw_wcB&gbraid=0AAAAAoWFwrdC3XBhKR6uCiRvUSaypUd-l"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 
 for folder in (DATA_DIR, UPLOAD_DIR, PROFILE_DIR, DOC_DIR):
@@ -128,6 +130,9 @@ def init_db():
         """CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)""",
         "ALTER TABLE reservations ADD COLUMN IF NOT EXISTS parts_offer TEXT",
         "ALTER TABLE reservations ADD COLUMN IF NOT EXISTS parts_offer_file TEXT",
+        "ALTER TABLE reservations ADD COLUMN IF NOT EXISTS parts_offer_data BYTEA",
+        "ALTER TABLE reservations ADD COLUMN IF NOT EXISTS parts_offer_name TEXT",
+        "ALTER TABLE reservations ADD COLUMN IF NOT EXISTS parts_offer_mime TEXT",
         "ALTER TABLE reservations ADD COLUMN IF NOT EXISTS customer_parts_decision TEXT",
         "ALTER TABLE reservations ADD COLUMN IF NOT EXISTS customer_parts_comment TEXT",
         "ALTER TABLE reservations ADD COLUMN IF NOT EXISTS customer_parts_responded_at TIMESTAMPTZ",
@@ -156,7 +161,7 @@ def init_db():
                 "youtube_1": "", "youtube_2": "", "youtube_3": "",
                 "help_oil": "", "help_filters": "", "help_brakes": "",
                 "help_interior": "", "help_exterior": "", "help_spark_plugs": "",
-                "autodoc_channel": "", "autodoc_parts": "",
+                "autodoc_channel": "", "autodoc_parts": AUTODOC_PARTS_URL,
                 "slot_minutes": "60", "open_hour": "09:00", "close_hour": "18:00",
                 "admin_pin_hash": hash_value(os.getenv("ADMIN_PIN", "2468")),
             }
@@ -230,6 +235,17 @@ def apply_style():
         box-shadow:0 8px 22px rgba(22,163,74,.38);
     }}
     </style>""", unsafe_allow_html=True)
+    if AUTODOC_LOGO.exists():
+        logo_b64 = base64.b64encode(AUTODOC_LOGO.read_bytes()).decode("utf-8")
+        st.markdown(f"""<style>
+        .st-key-client_nav_autodoc button {{
+            background-image: linear-gradient(135deg,rgba(114,0,0,.95),rgba(208,16,16,.95)), url(data:image/jpeg;base64,{logo_b64}) !important;
+            background-size: cover, 86px auto !important;
+            background-repeat: no-repeat !important;
+            background-position: center, 14px center !important;
+            padding-left: 92px !important;
+        }}
+        </style>""", unsafe_allow_html=True)
 
 def user_by_phone(phone):
     return fetchone("SELECT * FROM users WHERE phone=%s", (phone.strip(),))
@@ -521,7 +537,14 @@ def parts_order_builder():
     return selected
 
 
+def show_autodoc_logo(width=260):
+    if AUTODOC_LOGO.exists():
+        st.image(str(AUTODOC_LOGO), width=width)
+    else:
+        st.markdown("### AUTODOC")
+
 def autodoc_help():
+    show_autodoc_logo(300)
     st.markdown("## Помощ от AUTODOC")
     st.caption("Изберете категория. Администраторът определя видеото, което се показва във всяка секция.")
     categories = [
@@ -537,7 +560,7 @@ def autodoc_help():
     st.markdown("### Не намирате подходящата секция?")
     st.write("Посетете канала на AUTODOC и потърсете конкретен ремонт за вашия автомобил.")
     channel = setting("autodoc_channel", "").strip()
-    parts = setting("autodoc_parts", "").strip()
+    parts = setting("autodoc_parts", "").strip() or AUTODOC_PARTS_URL
     c1, c2 = st.columns(2)
     if channel: c1.link_button("▶️ Отвори канала на AUTODOC", channel, use_container_width=True)
     else: c1.info("Линкът към канала ще бъде добавен от администратора.")
@@ -601,10 +624,30 @@ def new_reservation(user_id):
         st.session_state.pending_slot = (selected.isoformat(), start_value, end_value, duration_slots)
     if "pending_slot" not in st.session_state: return
     day_value, pending_start, pending_end, pending_duration = st.session_state.pending_slot
-    st.markdown('<div class="notice">Заявка за части се подава минимум 1 ден предварително.</div>', unsafe_allow_html=True)
-    wants = st.radio("Желаете ли да закупите части предварително?", ["Не, само резервация", "Да, желая части"])
+    st.markdown('<div class="notice">Заявка за части, които да ви очакват в сервиза, се подава минимум 1 ден предварително.</div>', unsafe_allow_html=True)
+    show_autodoc_logo(220)
+    st.markdown("### Желаете ли да закупите части, които да ви очакват в сервиза?")
+    if "parts_purchase_choice" not in st.session_state:
+        st.session_state.parts_purchase_choice = "reservation_only"
+    choice_cols = st.columns(3)
+    with choice_cols[0]:
+        if st.button("Само резервация", key="choice_reservation_only", use_container_width=True,
+                     type="primary" if st.session_state.parts_purchase_choice == "reservation_only" else "secondary"):
+            st.session_state.parts_purchase_choice = "reservation_only"; st.rerun()
+    with choice_cols[1]:
+        autodoc_url = setting("autodoc_parts", "").strip() or AUTODOC_PARTS_URL
+        st.link_button("Искам да закупя от AUTODOC", autodoc_url, use_container_width=True)
+    with choice_cols[2]:
+        if st.button("Желая части да ме очакват в сервиза", key="choice_parts_waiting", use_container_width=True,
+                     type="primary" if st.session_state.parts_purchase_choice == "parts_waiting" else "secondary"):
+            st.session_state.parts_purchase_choice = "parts_waiting"; st.rerun()
+    wants_parts_choice = st.session_state.parts_purchase_choice == "parts_waiting"
+    if wants_parts_choice:
+        st.success("Избрано: желая частите да ме очакват в сервиза.")
+    else:
+        st.info("Избрано: само резервация, без заявка за части към сервиза.")
     parts_comment = ""; vin = ""; doc_path = None; valid_parts = True
-    if wants.startswith("Да"):
+    if wants_parts_choice:
         reservation_dt = datetime.combine(date.fromisoformat(day_value), datetime.strptime(pending_start, "%H:%M").time())
         if reservation_dt < datetime.now() + timedelta(days=1):
             st.error("За заявка с части изберете период поне 1 ден напред."); valid_parts = False
@@ -617,7 +660,7 @@ def new_reservation(user_id):
             document_file = st.camera_input("Снимай талона", key="registration_doc_camera") if source == "Снимай с камера" else st.file_uploader("Качи снимка или PDF", type=["jpg","jpeg","png","pdf"], key="registration_doc_upload")
             if document_file: doc_path = save_upload(document_file, DOC_DIR, "talon"); st.success("Талонът е приложен успешно.")
     if st.button("Потвърди и изпрати заявката", use_container_width=True, disabled=not valid_parts):
-        wants_parts = wants.startswith("Да")
+        wants_parts = wants_parts_choice
         if wants_parts and not parts_comment.strip(): st.error("Добавете поне един продукт в поръчката."); return
         if wants_parts and len(vin) != 17 and not doc_path: st.error("Въведете 17-символен VIN или приложете талона."); return
         reservation_date = date.fromisoformat(day_value)
@@ -626,7 +669,7 @@ def new_reservation(user_id):
         if overlap: st.error("Избраният период вече съдържа зает час."); st.session_state.pop("pending_slot",None); return
         try:
             execute("""INSERT INTO reservations(user_id,reservation_date,start_time,end_time,wants_parts,parts_comment,vin,registration_doc,parts_status) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)""", (user_id,reservation_date,start_time_db,end_time_db,wants_parts,parts_comment,vin,doc_path,"Очаква преглед" if wants_parts else None))
-            for key in ["pending_slot","slot_start_index","slot_end_index"]: st.session_state.pop(key,None)
+            for key in ["pending_slot","slot_start_index","slot_end_index","parts_purchase_choice"]: st.session_state.pop(key,None)
             st.session_state.client_flash=f"Потвърдено: резервацията е изпратена за {day_value}, от {pending_start} до {pending_end}."
             st.rerun()
         except IntegrityError:
@@ -644,12 +687,26 @@ def history(user_id):
             st.write("**Заявка за части:**","Да" if r["wants_parts"] else "Не")
             if r["parts_status"]: st.write("**Статус части:**",r["parts_status"])
             if r.get("parts_offer"): st.info(r["parts_offer"])
-            if r.get("parts_offer_file"):
+            offer_bytes = bytes(r["parts_offer_data"]) if r.get("parts_offer_data") else None
+            offer_name = r.get("parts_offer_name") or "oferta.pdf"
+            offer_mime = r.get("parts_offer_mime") or "application/octet-stream"
+            if offer_bytes:
+                st.markdown("**📎 Прикачена оферта от сервиза:**")
+                if offer_mime.startswith("image/"):
+                    st.image(offer_bytes, caption=offer_name, use_container_width=True)
+                elif offer_mime == "application/pdf":
+                    pdf_b64 = base64.b64encode(offer_bytes).decode("utf-8")
+                    st.markdown(f'<iframe src="data:application/pdf;base64,{pdf_b64}" width="100%" height="700" style="border:1px solid #555;border-radius:10px;"></iframe>', unsafe_allow_html=True)
+                st.download_button("⬇️ Отвори / изтегли офертата", data=offer_bytes, file_name=offer_name,
+                                   mime=offer_mime, key=f"offer_download_{r['id']}", use_container_width=True)
+            elif r.get("parts_offer_file"):
                 offer_path=Path(r["parts_offer_file"])
                 if offer_path.exists():
-                    if offer_path.suffix.lower() in [".jpg",".jpeg",".png",".webp"]: st.image(str(offer_path),use_container_width=True)
-                    with open(offer_path,"rb") as offer_file:
-                        st.download_button("⬇️ Отвори / изтегли офертата",offer_file.read(),offer_path.name,"application/pdf" if offer_path.suffix.lower()==".pdf" else "application/octet-stream",key=f"offer_download_{r['id']}",use_container_width=True)
+                    legacy_bytes=offer_path.read_bytes()
+                    if offer_path.suffix.lower() in [".jpg",".jpeg",".png",".webp"]: st.image(legacy_bytes,use_container_width=True)
+                    st.download_button("⬇️ Отвори / изтегли офертата",legacy_bytes,offer_path.name,
+                                       "application/pdf" if offer_path.suffix.lower()==".pdf" else "application/octet-stream",
+                                       key=f"offer_download_{r['id']}",use_container_width=True)
             if r["admin_note"]: st.write("**Съобщение от сервиза:**",r["admin_note"])
             if r["door_pin"]: st.success(f"PIN за вход: {r['door_pin']}")
             if r["status"] == "Завършена" and r.get("final_amount") is not None:
@@ -665,7 +722,7 @@ def history(user_id):
             if r.get("customer_parts_decision"):
                 st.write("**Вашето решение:**",r["customer_parts_decision"])
                 if r.get("customer_parts_comment"): st.write("**Вашият избор:**",r["customer_parts_comment"])
-            elif r["wants_parts"] and r["parts_status"]=="Можем да подготвим" and r.get("parts_offer"):
+            elif r["wants_parts"] and r["parts_status"]=="Можем да подготвим" and (r.get("parts_offer") or r.get("parts_offer_data") or r.get("parts_offer_file")):
                 decision=st.radio("Изберете решение",["Избери","Искам","Отказвам"],key=f"dec_{r['id']}")
                 comment=""
                 if decision=="Искам":
@@ -821,7 +878,7 @@ def client_panel():
 
     nav_items = [
         ("🏠 Начало", "Начало"),
-        ("🐶 Помощ от AUTODOC", "Помощ от AUTODOC"),
+        ("Помощ от AUTODOC", "Помощ от AUTODOC"),
         ("📅 Запази час", "Запази час"),
         ("🧾 Моите резервации", "Моите резервации"),
         ("🛠 Технически проблем", "Технически проблем"),
@@ -831,7 +888,7 @@ def client_panel():
         with column:
             if st.button(
                 label,
-                key=f"client_nav_{page_name}",
+                key="client_nav_autodoc" if page_name == "Помощ от AUTODOC" else f"client_nav_{page_name}",
                 use_container_width=True,
                 type="primary" if st.session_state.client_page == page_name else "secondary",
             ):
@@ -919,20 +976,28 @@ def admin_reservations():
             ps=c2.selectbox("Статус части",part_statuses,index=part_statuses.index(cur),key=f"p_{r['id']}")
             offer=st.text_area("Предложение за части",value=r.get("parts_offer") or "",placeholder="Диск 1 – 50 евро\nДиск 2 – 40 евро",key=f"off_{r['id']}",disabled=not r["wants_parts"])
             offer_upload=st.file_uploader("📎 Качи оферта (PDF или снимка)",type=["pdf","jpg","jpeg","png","webp"],key=f"offer_file_{r['id']}",disabled=not r["wants_parts"])
-            if r.get("parts_offer_file"): st.caption(f"Текущ файл: {Path(r['parts_offer_file']).name}")
+            if r.get("parts_offer_data") or r.get("parts_offer_file"):
+                st.success(f"Има прикачена оферта: {r.get('parts_offer_name') or Path(r.get('parts_offer_file') or 'оферта').name}")
             note=st.text_area("Съобщение към клиента",value=r["admin_note"] or "",key=f"n_{r['id']}")
             pin=st.text_input("PIN",value=r["door_pin"] or "",key=f"pin_{r['id']}")
             final_amount=st.number_input("Крайна сума за плащане (€)",min_value=0.0,max_value=100000.0,value=float(r.get("final_amount") or 0),step=0.01,key=f"amount_{r['id']}")
             if st.button("Запази промените",key=f"save_{r['id']}",use_container_width=True):
-                if ps=="Можем да подготвим" and not (offer.strip() or offer_upload or r.get("parts_offer_file")): st.error("Добавете текст или PDF/снимка с офертата.")
+                if ps=="Можем да подготвим" and not (offer.strip() or offer_upload or r.get("parts_offer_data") or r.get("parts_offer_file")): st.error("Добавете текст или PDF/снимка с офертата.")
                 else:
                     
                     if ns=="Завършена" and final_amount <= 0:
                         st.error("Преди финализиране въведете крайна сума за плащане."); return
                     offer_file_path=r.get("parts_offer_file")
-                    if offer_upload is not None: offer_file_path=save_upload(offer_upload,DOC_DIR,f"offer_{r['id']}")
-                    execute("UPDATE reservations SET status=%s,parts_status=%s,parts_offer=%s,parts_offer_file=%s,admin_note=%s,door_pin=%s,final_amount=%s WHERE id=%s",
-                            (ns,None if ps=="—" else ps,offer.strip() or None,offer_file_path,note.strip() or None,pin.strip() or None,final_amount if final_amount>0 else None,r["id"]))
+                    offer_data=r.get("parts_offer_data")
+                    offer_name=r.get("parts_offer_name")
+                    offer_mime=r.get("parts_offer_mime")
+                    if offer_upload is not None:
+                        offer_data=psycopg2.Binary(offer_upload.getvalue())
+                        offer_name=offer_upload.name
+                        offer_mime=offer_upload.type or "application/octet-stream"
+                        offer_file_path=None
+                    execute("UPDATE reservations SET status=%s,parts_status=%s,parts_offer=%s,parts_offer_file=%s,parts_offer_data=%s,parts_offer_name=%s,parts_offer_mime=%s,admin_note=%s,door_pin=%s,final_amount=%s WHERE id=%s",
+                            (ns,None if ps=="—" else ps,offer.strip() or None,offer_file_path,offer_data,offer_name,offer_mime,note.strip() or None,pin.strip() or None,final_amount if final_amount>0 else None,r["id"]))
                     st.session_state.admin_flash = (
                         f"Потвърдено: резервация #{r['id']} е обновена. "
                         f"Статус: {ns}. Статус части: {ps}."
