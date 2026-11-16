@@ -368,6 +368,11 @@ def restore_login_session():
     if row.get("user_id"): st.session_state.user_id=row["user_id"]
     return True
 
+def keep_session_in_url():
+    token=st.session_state.get("login_token") or st.query_params.get("session")
+    if token and st.query_params.get("session") != token:
+        st.query_params["session"] = token
+
 def logout():
     token=st.session_state.get("login_token") or st.query_params.get("session")
     if token: execute("DELETE FROM login_sessions WHERE token_hash=%s",(session_hash(token),))
@@ -728,9 +733,11 @@ def new_reservation(user_id):
             source = st.radio("Как желаете да добавите талона?", ["Снимай с камера", "Качи готов файл"], horizontal=True, key="registration_document_source")
             document_file = st.camera_input("Снимай талона", key="registration_doc_camera") if source == "Снимай с камера" else st.file_uploader("Качи снимка или PDF", type=["jpg","jpeg","png","pdf"], key="registration_doc_upload")
             if document_file: doc_path = save_upload(document_file, DOC_DIR, "talon"); st.success("Талонът е приложен успешно.")
+    booking_fee = reservation_fee() * max(1, pending_duration)
     direct_payment = (not wants_parts_choice and not autodoc_choice and st.session_state.get("show_direct_payment"))
     if direct_payment:
-        st.markdown(f"### Сума за плащане: {reservation_fee():.2f} €")
+        st.markdown(f"### Сума за плащане: {booking_fee:.2f} €")
+        st.caption(f"{pending_duration} час(а) × {reservation_fee():.2f} €")
         st.warning("Тестов режим: плащането ще бъде отчетено като получено, без реална картова транзакция.")
     final_button_label = "💳 Потвърди часа и плати с карта" if direct_payment else "Потвърди и изпрати заявката"
     if st.button(final_button_label, use_container_width=True, disabled=not valid_parts, type="primary" if direct_payment else "secondary"):
@@ -748,7 +755,7 @@ def new_reservation(user_id):
                     (user_id,reservation_date,start_time_db,end_time_db,wants_parts,parts_comment,vin,doc_path,
                      "Очаква преглед" if wants_parts else None,wants_parts,
                      "parts" if wants_parts else "reservation",
-                     None if wants_parts else reservation_fee(),
+                     None if wants_parts else booking_fee,
                      "unpaid" if wants_parts else "paid",
                      None if wants_parts else "card",
                      not wants_parts,
@@ -765,7 +772,7 @@ def new_reservation(user_id):
 def history(user_id):
     expire_stale_parts_requests()
     st.subheader("История на резервациите")
-    rows=fetchall("SELECT * FROM reservations WHERE user_id=%s ORDER BY reservation_date DESC,start_time DESC",(user_id,))
+    rows=fetchall("""SELECT r.*, GREATEST(1, CEIL(EXTRACT(EPOCH FROM (r.end_time-r.start_time))/3600.0)) * %s AS duration_fee FROM reservations r WHERE user_id=%s ORDER BY reservation_date DESC,start_time DESC""",(reservation_fee(),user_id))
     if not rows: st.info("Все още няма резервации."); return
     for r in rows:
         day=r["reservation_date"].isoformat(); start_hour=r["start_time"].strftime("%H:%M"); end_hour=r["end_time"].strftime("%H:%M")
@@ -813,7 +820,7 @@ def history(user_id):
                     elif chosen and no_parts: st.error("Изберете артикули или отказ от всички части, но не и двете.")
                     else:
                         if no_parts:
-                            execute("""UPDATE reservations SET selected_items_json='[]',selected_items_total=0,customer_parts_decision='Отказвам частите',customer_parts_comment=%s,customer_selection_at=NOW(),customer_parts_responded_at=NOW(),parts_status='Без избрани части',payment_due_type='reservation',final_amount=%s,expires_at=NULL WHERE id=%s AND user_id=%s""",(comment.strip() or None,reservation_fee(),r["id"],user_id))
+                            execute("""UPDATE reservations SET selected_items_json='[]',selected_items_total=0,customer_parts_decision='Отказвам частите',customer_parts_comment=%s,customer_selection_at=NOW(),customer_parts_responded_at=NOW(),parts_status='Без избрани части',payment_due_type='reservation',final_amount=%s,expires_at=NULL WHERE id=%s AND user_id=%s""",(comment.strip() or None,float(r.get("duration_fee") or reservation_fee()),r["id"],user_id))
                             notify("admin","Клиентът отказа частите",f"Резервация #{r['id']}: клиентът не желае артикули от офертата.",target_page="Резервации",reservation_id=r["id"]); st.session_state.client_flash="Отказахте частите. Вече можете да платите само заявения час."
                         else:
                             execute("""UPDATE reservations SET selected_items_json=%s,selected_items_total=%s,customer_parts_decision='Изпратен избор',customer_parts_comment=%s,customer_selection_at=NOW(),customer_parts_responded_at=NOW(),parts_status='Избор от клиента',expires_at=NOW()+INTERVAL '3 hours' WHERE id=%s AND user_id=%s""",(json.dumps(chosen,ensure_ascii=False),total,comment.strip() or None,r["id"],user_id))
@@ -825,7 +832,7 @@ def history(user_id):
                 st.success("🔔 Администрацията потвърди избраните артикули. Офертата и часът са готови за общо плащане.")
                 for x in selected_items: st.write(f"• {x.get('article')} · {x.get('qty')} бр. × {float(x.get('price',0)):.2f} €")
                 st.write(f"**Части:** {float(r.get('selected_items_total') or 0):.2f} €")
-                st.write(f"**Такса за часа:** {reservation_fee():.2f} €")
+                st.write(f"**Такса за резервираното време:** {float(r.get('duration_fee') or reservation_fee()):.2f} €")
             elif r.get("parts_status")=="Без избрани части":
                 st.info("Не са избрани части. Дължи се само таксата за заявения час.")
             if r.get("payment_status")=="paid":
@@ -997,7 +1004,6 @@ def client_panel():
 
     with st.sidebar:
         st.write(f"**{user['first_name']} {user['last_name']}**")
-        notification_center("client",user["id"])
         if st.button("🏠 Начало", key="sidebar_home", use_container_width=True):
             st.session_state.client_page = "Начало"
             st.rerun()
@@ -1013,6 +1019,7 @@ def client_panel():
     page = st.session_state.client_page
     st.markdown("---")
     if page == "Начало":
+        notification_center("client",user["id"])
         video_section()
     elif page == "Помощ от AUTODOC":
         autodoc_help()
@@ -1033,8 +1040,8 @@ def admin_reservations():
     st.subheader("Мониторинг на резервациите")
     statuses=["Очаква потвърждение","Потвърдена","Отказана","Завършена"]
     selected=st.multiselect("Статус",statuses,default=statuses[:2])
-    rows=fetchall("""SELECT r.*,u.first_name,u.last_name,u.phone FROM reservations r JOIN users u ON u.id=r.user_id
-                     WHERE r.status NOT IN ('Завършена','Отказана','Анулирана') ORDER BY r.reservation_date,r.start_time""")
+    rows=fetchall("""SELECT r.*,u.first_name,u.last_name,u.phone, GREATEST(1, CEIL(EXTRACT(EPOCH FROM (r.end_time-r.start_time))/3600.0)) * %s AS duration_fee FROM reservations r JOIN users u ON u.id=r.user_id
+                     WHERE r.status NOT IN ('Завършена','Отказана','Анулирана') ORDER BY r.reservation_date,r.start_time""",(reservation_fee(),))
     rows=[r for r in rows if not selected or r["status"] in selected]
     for r in rows:
         day=r["reservation_date"].isoformat(); start=r["start_time"].strftime("%H:%M"); end=r["end_time"].strftime("%H:%M")
@@ -1087,7 +1094,7 @@ def admin_reservations():
             if r.get("parts_status")=="Избор от клиента":
                 if st.button("✅ Потвърди избора на клиента",key=f"approve_choice_{r['id']}",use_container_width=True,type="primary"):
                     parts_total=float(r.get("selected_items_total") or 0)
-                    total=parts_total + reservation_fee()
+                    total=parts_total + float(r.get("duration_fee") or reservation_fee())
                     execute("""UPDATE reservations SET parts_status='Изборът е потвърден',admin_selection_confirmed_at=NOW(),final_amount=%s,payment_due_type='parts_and_reservation',expires_at=NOW()+INTERVAL '3 hours',admin_note=%s WHERE id=%s""",(total,note.strip() or None,r["id"]))
                     notify("client","Изборът е потвърден",f"Избраните артикули за резервация #{r['id']} са потвърдени. Вече можете да платите.",user_id=r["user_id"],target_page="Моите резервации",reservation_id=r["id"]); st.session_state.admin_flash=f"Изборът на клиента за #{r['id']} е потвърден. Изпратено е известие за плащане."; st.rerun()
             if st.button("Запази статус / PIN / съобщение",key=f"save_meta_{r['id']}",use_container_width=True):
@@ -1176,7 +1183,6 @@ def admin_panel():
     st.subheader("Административен панел")
 
     with st.sidebar:
-        notification_center("admin")
         page = st.radio(
             "Админ меню",
             ["Табло", "Резервации", "Архив", "Статистика", "Технически сигнали", "Видео съдържание", "Помощ AUTODOC", "Финанси", "Настройки"],
@@ -1189,6 +1195,7 @@ def admin_panel():
         st.success(st.session_state.pop("admin_flash"))
 
     if page == "Табло":
+        notification_center("admin")
         pending = fetchone("SELECT COUNT(*) AS c FROM reservations WHERE status='Очаква потвърждение'")["c"]
         parts = fetchone("""SELECT COUNT(*) AS c FROM reservations
                           WHERE wants_parts=TRUE
@@ -1384,6 +1391,14 @@ except Exception as exc:
     st.code(str(exc))
     st.stop()
 
+if "role" not in st.session_state:
+    try:
+        restore_login_session()
+    except Exception:
+        st.cache_resource.clear()
+        try: restore_login_session()
+        except Exception: pass
+
 apply_style()
 
 if "role" not in st.session_state:
@@ -1413,7 +1428,9 @@ if "role" not in st.session_state:
         login_view()
 
 elif st.session_state.role == "client":
+    keep_session_in_url()
     client_panel()
 
 else:
+    keep_session_in_url()
     admin_panel()
