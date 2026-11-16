@@ -706,12 +706,13 @@ def new_reservation(user_id):
     if wants_parts_choice:
         st.success("Избрано: заявка за части към сервиза. Часът се пази временно и очаква обратна връзка от администрацията. На този етап не се взима плащане.")
     elif autodoc_choice:
-        st.warning("AUTODOC изисква регистрация в сайта. Преди да резервирате час, уверете се кога ще пристигнат закупените части.")
+        st.info("Тази опция е само информативна и препраща към сайта на AUTODOC. Тук не се създава и не се запазва резервация.")
+        st.warning("AUTODOC изисква регистрация. Преди да запазите отделно час в сервиза, проверете кога ще пристигнат закупените части.")
         read_autodoc = st.checkbox("Прочетох информацията и разбирам, че трябва да знам датата на доставка.", key="autodoc_terms_read")
         autodoc_url = setting("autodoc_parts", "").strip() or AUTODOC_PARTS_URL
         if read_autodoc:
             st.link_button("Отиди директно в AUTODOC", autodoc_url, use_container_width=True)
-        st.info("За резервацията по-долу се приема, че ще осигурите частите самостоятелно.")
+        return
     else:
         st.info(f"Избрано: само резервация. След изпращане ще платите тестово таксата за часа: {reservation_fee():.2f} €.")
     parts_comment = ""; vin = ""; doc_path = None; valid_parts = True
@@ -784,8 +785,12 @@ def history(user_id):
                     if mime.startswith("image/"): st.image(offer_bytes,caption=name,width=760)
                     elif mime=="application/pdf":
                         b64=base64.b64encode(offer_bytes).decode("utf-8")
-                        st.markdown(f'<iframe src="data:application/pdf;base64,{b64}" width="100%" height="430" style="border:1px solid #555;border-radius:10px;"></iframe>',unsafe_allow_html=True)
-                    st.download_button("⬇️ Отвори / изтегли офертата",offer_bytes,name,mime,key=f"offer_download_{r['id']}",use_container_width=True)
+                        pdf_data=f"data:application/pdf;base64,{b64}"
+                        st.markdown(f"""<object data="{pdf_data}" type="application/pdf" width="100%" height="430" style="border:1px solid #555;border-radius:10px;">
+                        <embed src="{pdf_data}" type="application/pdf" width="100%" height="430" />
+                        <p style="color:white">Мобилният браузър не поддържа вграден PDF преглед. Използвайте бутона под него.</p>
+                        </object>""",unsafe_allow_html=True)
+                    st.download_button("📱 Отвори / изтегли офертата",offer_bytes,name,mime,key=f"offer_download_{r['id']}",use_container_width=True,type="primary")
             try: offer_items=json.loads(r.get("offer_items_json") or "[]")
             except Exception: offer_items=[]
             try: selected_items=json.loads(r.get("selected_items_json") or "[]")
@@ -817,8 +822,10 @@ def history(user_id):
             elif r.get("parts_status")=="Избор от клиента":
                 st.warning("Изборът е изпратен и очаква потвърждение от администрацията. Плащане още не се изисква.")
             elif r.get("parts_status")=="Изборът е потвърден":
-                st.success("🔔 Администрацията потвърди избраните артикули. Офертата е готова за плащане.")
+                st.success("🔔 Администрацията потвърди избраните артикули. Офертата и часът са готови за общо плащане.")
                 for x in selected_items: st.write(f"• {x.get('article')} · {x.get('qty')} бр. × {float(x.get('price',0)):.2f} €")
+                st.write(f"**Части:** {float(r.get('selected_items_total') or 0):.2f} €")
+                st.write(f"**Такса за часа:** {reservation_fee():.2f} €")
             elif r.get("parts_status")=="Без избрани части":
                 st.info("Не са избрани части. Дължи се само таксата за заявения час.")
             if r.get("payment_status")=="paid":
@@ -1079,8 +1086,9 @@ def admin_reservations():
                         notify("client","Нова оферта",f"Имате нова оферта за резервация #{r['id']}. Разполагате с 3 часа за избор.",user_id=r["user_id"],target_page="Моите резервации",reservation_id=r["id"]); st.session_state.admin_flash=f"Офертата за резервация #{r['id']} е изпратена. Клиентът има 3 часа за действие."; st.rerun()
             if r.get("parts_status")=="Избор от клиента":
                 if st.button("✅ Потвърди избора на клиента",key=f"approve_choice_{r['id']}",use_container_width=True,type="primary"):
-                    total=float(r.get("selected_items_total") or 0)
-                    execute("""UPDATE reservations SET parts_status='Изборът е потвърден',admin_selection_confirmed_at=NOW(),final_amount=%s,payment_due_type='parts',expires_at=NOW()+INTERVAL '3 hours',admin_note=%s WHERE id=%s""",(total,note.strip() or None,r["id"]))
+                    parts_total=float(r.get("selected_items_total") or 0)
+                    total=parts_total + reservation_fee()
+                    execute("""UPDATE reservations SET parts_status='Изборът е потвърден',admin_selection_confirmed_at=NOW(),final_amount=%s,payment_due_type='parts_and_reservation',expires_at=NOW()+INTERVAL '3 hours',admin_note=%s WHERE id=%s""",(total,note.strip() or None,r["id"]))
                     notify("client","Изборът е потвърден",f"Избраните артикули за резервация #{r['id']} са потвърдени. Вече можете да платите.",user_id=r["user_id"],target_page="Моите резервации",reservation_id=r["id"]); st.session_state.admin_flash=f"Изборът на клиента за #{r['id']} е потвърден. Изпратено е известие за плащане."; st.rerun()
             if st.button("Запази статус / PIN / съобщение",key=f"save_meta_{r['id']}",use_container_width=True):
                 execute("UPDATE reservations SET status=%s,admin_note=%s,door_pin=%s WHERE id=%s",(ns,note.strip() or None,pin.strip() or None,r["id"]))
@@ -1143,7 +1151,7 @@ def admin_finance():
     expenses=fetchall("SELECT id,expense_date,category,amount,description,created_at FROM expenses ORDER BY expense_date DESC,id DESC")
     movements=[]
     for x in incomes:
-        movements.append({"Дата":x.get("paid_at") or x.get("reservation_date"),"Тип":"Приход","Източник":f"Резервация #{x['id']} · {x['first_name']} {x['last_name']}","Основание":"Части" if x.get("payment_due_type")=="parts" else "Такса за час","Приход EUR":float(x.get("final_amount") or 0),"Разход EUR":0.0,"Тестово":"Да" if x.get("test_payment") else "Не"})
+        movements.append({"Дата":x.get("paid_at") or x.get("reservation_date"),"Тип":"Приход","Източник":f"Резервация #{x['id']} · {x['first_name']} {x['last_name']}","Основание":"Части + такса за час" if x.get("payment_due_type")=="parts_and_reservation" else ("Части" if x.get("payment_due_type")=="parts" else "Такса за час"),"Приход EUR":float(x.get("final_amount") or 0),"Разход EUR":0.0,"Тестово":"Да" if x.get("test_payment") else "Не"})
     for x in expenses:
         movements.append({"Дата":x.get("created_at") or x.get("expense_date"),"Тип":"Разход","Източник":x.get("category"),"Основание":x.get("description") or "Без описание","Приход EUR":0.0,"Разход EUR":float(x.get("amount") or 0),"Тестово":"Не"})
     movements.sort(key=lambda x:str(x["Дата"]),reverse=True)
