@@ -2,6 +2,7 @@ import os
 import uuid
 import hashlib
 import base64
+import json
 from contextlib import contextmanager
 from datetime import datetime, date, timedelta
 from pathlib import Path
@@ -141,6 +142,9 @@ def init_db():
         "ALTER TABLE reservations ADD COLUMN IF NOT EXISTS payment_method TEXT",
         "ALTER TABLE reservations ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ",
         "ALTER TABLE reservations ADD COLUMN IF NOT EXISTS test_payment BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE reservations ADD COLUMN IF NOT EXISTS offer_items_json TEXT",
+        "ALTER TABLE reservations ADD COLUMN IF NOT EXISTS selected_items_json TEXT",
+        "ALTER TABLE reservations ADD COLUMN IF NOT EXISTS selected_items_total NUMERIC(12,2)",
         """CREATE TABLE IF NOT EXISTS login_sessions(
             id BIGSERIAL PRIMARY KEY, user_id BIGINT REFERENCES users(id) ON DELETE CASCADE,
             role TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE,
@@ -663,74 +667,68 @@ def new_reservation(user_id):
         except IntegrityError:
             st.error("Началният час току-що е резервиран. Изберете друг период.")
 
-def history(user_id):
-    st.subheader("История на резервациите")
-    rows=fetchall("SELECT * FROM reservations WHERE user_id=%s ORDER BY reservation_date DESC,start_time DESC",(user_id,))
-    if not rows: st.info("Все още няма резервации."); return
-    for r in rows:
-        day=r["reservation_date"].isoformat()
-        start_hour=r["start_time"].strftime("%H:%M")
-        end_hour=r["end_time"].strftime("%H:%M")
-        with st.expander(f"{day} • {start_hour}–{end_hour} • {r['status']}"):
-            st.write("**Заявка за части:**","Да" if r["wants_parts"] else "Не")
-            if r["parts_status"]: st.write("**Статус части:**",r["parts_status"])
-            if r.get("parts_offer"): st.info(r["parts_offer"])
-            offer_bytes = bytes(r["parts_offer_data"]) if r.get("parts_offer_data") else None
-            offer_name = r.get("parts_offer_name") or "oferta.pdf"
-            offer_mime = r.get("parts_offer_mime") or "application/octet-stream"
-            if offer_bytes:
-                st.markdown("**📎 Прикачена оферта от сервиза:**")
-                if offer_mime.startswith("image/"):
-                    st.image(offer_bytes, caption=offer_name, use_container_width=True)
-                elif offer_mime == "application/pdf":
-                    pdf_b64 = base64.b64encode(offer_bytes).decode("utf-8")
-                    st.markdown(f'<iframe src="data:application/pdf;base64,{pdf_b64}" width="100%" height="700" style="border:1px solid #555;border-radius:10px;"></iframe>', unsafe_allow_html=True)
-                st.download_button("⬇️ Отвори / изтегли офертата", data=offer_bytes, file_name=offer_name,
-                                   mime=offer_mime, key=f"offer_download_{r['id']}", use_container_width=True)
-            elif r.get("parts_offer_file"):
-                offer_path=Path(r["parts_offer_file"])
-                if offer_path.exists():
-                    legacy_bytes=offer_path.read_bytes()
-                    if offer_path.suffix.lower() in [".jpg",".jpeg",".png",".webp"]: st.image(legacy_bytes,use_container_width=True)
-                    st.download_button("⬇️ Отвори / изтегли офертата",legacy_bytes,offer_path.name,
-                                       "application/pdf" if offer_path.suffix.lower()==".pdf" else "application/octet-stream",
-                                       key=f"offer_download_{r['id']}",use_container_width=True)
-            if r["admin_note"]: st.write("**Съобщение от сервиза:**",r["admin_note"])
-            if r["door_pin"]: st.success(f"PIN за вход: {r['door_pin']}")
-            if r["status"] == "Завършена" and r.get("final_amount") is not None:
-                st.markdown(f"### Дължима сума: {float(r['final_amount']):.2f} €")
-                if r.get("payment_status") == "paid":
-                    st.success(f"✅ Платено с карта (тестов режим) · {r.get('paid_at'):%d.%m.%Y %H:%M}" if r.get('paid_at') else "✅ Платено с карта (тестов режим)")
-                else:
-                    st.warning("ТЕСТОВО ПЛАЩАНЕ: няма да бъде изтеглена реална сума от карта.")
-                    if st.button("💳 Плати с карта",key=f"pay_res_{r['id']}",use_container_width=True,type="primary"):
-                        execute("UPDATE reservations SET payment_status='paid',payment_method='card',paid_at=NOW(),test_payment=TRUE WHERE id=%s AND user_id=%s AND status='Завършена'",(r["id"],user_id))
-                        st.session_state.client_flash=f"Тестовото картово плащане за резервация #{r['id']} е отчетено успешно."
-                        st.rerun()
-            if r.get("customer_parts_decision"):
-                st.write("**Вашето решение:**",r["customer_parts_decision"])
-                if r.get("customer_parts_comment"): st.write("**Вашият избор:**",r["customer_parts_comment"])
-            elif r["wants_parts"] and r["parts_status"]=="Можем да подготвим" and (r.get("parts_offer") or r.get("parts_offer_data") or r.get("parts_offer_file")):
-                decision=st.radio("Изберете решение",["Избери","Искам","Отказвам"],key=f"dec_{r['id']}")
-                comment=""
-                if decision=="Искам":
-                    comment=st.text_area("Кой вариант желаете? *",placeholder="Например: Искам диск 1 – 50 евро.",key=f"com_{r['id']}")
-                elif decision=="Отказвам":
-                    comment=st.text_area("Коментар (по желание)",key=f"com_{r['id']}")
-                if st.button("Потвърди избора",key=f"confirm_{r['id']}",use_container_width=True):
-                    if decision=="Избери": st.error("Изберете Искам или Отказвам.")
-                    elif decision=="Искам" and not comment.strip(): st.error("Напишете кой вариант желаете.")
-                    else:
-                        ps="Клиентът потвърди" if decision=="Искам" else "Клиентът отказа"
-                        execute("""UPDATE reservations SET customer_parts_decision=%s,customer_parts_comment=%s,
-                                   customer_parts_responded_at=NOW(),parts_status=%s WHERE id=%s AND user_id=%s""",
-                                (decision,comment.strip() or None,ps,r["id"],user_id))
-                        if decision == "Искам":
-                            st.session_state.client_flash = f"Потвърдено: приехте предложението за части. Избран вариант: {comment.strip()}"
-                        else:
-                            st.session_state.client_flash = "Потвърдено: отказахте предложението за части."
-                        st.rerun()
-
+def history(user_id):  
+      st.subheader("История на резервациите")  
+      rows=fetchall("SELECT * FROM reservations WHERE user_id=%s ORDER BY reservation_date DESC,start_time DESC",(user_id,))  
+      if not rows: st.info("Все още няма резервации."); return  
+      for r in rows:  
+          day=r["reservation_date"].isoformat()  
+          start_hour=r["start_time"].strftime("%H:%M")  
+          end_hour=r["end_time"].strftime("%H:%M")  
+          with st.expander(f"{day} • {start_hour}–{end_hour} • {r['status']}"):  
+              st.write("**Заявка за части:**","Да" if r["wants_parts"] else "Не")  
+              if r["parts_status"]: st.write("**Статус части:**",r["parts_status"])  
+              offer_bytes = bytes(r["parts_offer_data"]) if r.get("parts_offer_data") else None  
+              offer_name = r.get("parts_offer_name") or "oferta.pdf"  
+              offer_mime = r.get("parts_offer_mime") or "application/octet-stream"  
+              if offer_bytes:  
+                  with st.expander("📎 Преглед на офертата", expanded=False):  
+                      if offer_mime.startswith("image/"):  
+                          st.image(offer_bytes, caption=offer_name, width=760)  
+                      elif offer_mime == "application/pdf":  
+                          pdf_b64 = base64.b64encode(offer_bytes).decode("utf-8")  
+                          st.markdown(f'<iframe src="data:application/pdf;base64,{pdf_b64}" width="100%" height="430" style="border:1px solid #555;border-radius:10px;"></iframe>', unsafe_allow_html=True)  
+                      st.download_button("⬇️ Отвори / изтегли офертата", data=offer_bytes, file_name=offer_name, mime=offer_mime, key=f"offer_download_{r['id']}", use_container_width=True)  
+              elif r.get("parts_offer_file"):  
+                  offer_path=Path(r["parts_offer_file"])  
+                  if offer_path.exists():  
+                      legacy_bytes=offer_path.read_bytes()  
+                      with st.expander("📎 Преглед на офертата", expanded=False):  
+                          if offer_path.suffix.lower() in [".jpg",".jpeg",".png",".webp"]: st.image(legacy_bytes,width=760)  
+                          st.download_button("⬇️ Отвори / изтегли офертата",legacy_bytes,offer_path.name,"application/pdf" if offer_path.suffix.lower()==".pdf" else "application/octet-stream",key=f"offer_download_{r['id']}",use_container_width=True)  
+              if r["admin_note"]: st.write("**Съобщение от сервиза:**",r["admin_note"])  
+              if r["door_pin"]: st.success(f"PIN за вход: {r['door_pin']}")  
+              try:  
+                  offer_items=json.loads(r.get("offer_items_json") or "[]")  
+              except Exception:  
+                  offer_items=[]  
+              if offer_items:  
+                  st.markdown("### Изберете желаните артикули")  
+                  chosen=[]  
+                  for idx,item in enumerate(offer_items):  
+                      article=str(item.get("article","")).strip()  
+                      qty=int(item.get("qty",1) or 1)  
+                      price=float(item.get("price",0) or 0)  
+                      line_total=qty*price  
+                      if st.checkbox(f"{article} · {qty} бр. × {price:.2f} € = {line_total:.2f} €", key=f"choose_item_{r['id']}_{idx}", disabled=r.get("payment_status")=="paid"):  
+                          chosen.append({"article":article,"qty":qty,"price":price,"total":line_total})  
+                  selected_total=sum(x["total"] for x in chosen)  
+                  st.markdown(f"### Общо от избраните артикули: {selected_total:.2f} €")  
+                  customer_comment=st.text_area("Коментар към избора", value=r.get("customer_parts_comment") or "", key=f"customer_comment_{r['id']}", disabled=r.get("payment_status")=="paid")  
+                  if r.get("payment_status")=="paid":  
+                      st.success(f"✅ Поръчката е потвърдена и платена в тестов режим: {float(r.get('selected_items_total') or r.get('final_amount') or 0):.2f} €")  
+                  else:  
+                      st.warning("ТЕСТОВО ПЛАЩАНЕ: бутонът отчита плащане с карта, без реална банкова транзакция.")  
+                      if st.button("💳 Потвърди поръчката и плати с карта",key=f"pay_selected_{r['id']}",use_container_width=True,type="primary"):  
+                          if not chosen:  
+                              st.error("Маркирайте поне един артикул от офертата.")  
+                          else:  
+                              execute("""UPDATE reservations SET selected_items_json=%s,selected_items_total=%s,final_amount=%s,customer_parts_decision='Искам',customer_parts_comment=%s,customer_parts_responded_at=NOW(),parts_status='Клиентът потвърди',payment_status='paid',payment_method='card',paid_at=NOW(),test_payment=TRUE WHERE id=%s AND user_id=%s""",(json.dumps(chosen,ensure_ascii=False),selected_total,selected_total,customer_comment.strip() or None,r["id"],user_id))  
+                              st.session_state.client_flash=f"Поръчката е потвърдена. Тестово плащане: {selected_total:.2f} €."  
+                              st.rerun()  
+              elif r["status"] == "Завършена" and r.get("final_amount") is not None:  
+                  st.markdown(f"### Дължима сума: {float(r['final_amount']):.2f} €")  
+  
 def technical_issue(user_id):
 
     st.subheader("Технически проблем")
@@ -962,19 +960,31 @@ def admin_reservations():
             ns=c1.selectbox("Статус резервация",statuses,index=statuses.index(r["status"]),key=f"s_{r['id']}")
             cur=r["parts_status"] if r["parts_status"] in part_statuses else "—"
             ps=c2.selectbox("Статус части",part_statuses,index=part_statuses.index(cur),key=f"p_{r['id']}")
-            offer=st.text_area("Предложение за части",value=r.get("parts_offer") or "",placeholder="Диск 1 – 50 евро\nДиск 2 – 40 евро",key=f"off_{r['id']}",disabled=not r["wants_parts"])
-            offer_upload=st.file_uploader("📎 Качи оферта (PDF или снимка)",type=["pdf","jpg","jpeg","png","webp"],key=f"offer_file_{r['id']}",disabled=not r["wants_parts"])
-            if r.get("parts_offer_data") or r.get("parts_offer_file"):
-                st.success(f"Има прикачена оферта: {r.get('parts_offer_name') or Path(r.get('parts_offer_file') or 'оферта').name}")
-            note=st.text_area("Съобщение към клиента",value=r["admin_note"] or "",key=f"n_{r['id']}")
-            pin=st.text_input("PIN",value=r["door_pin"] or "",key=f"pin_{r['id']}")
-            final_amount=st.number_input("Крайна сума за плащане (€)",min_value=0.0,max_value=100000.0,value=float(r.get("final_amount") or 0),step=0.01,key=f"amount_{r['id']}")
+            offer_upload=st.file_uploader("📎 Качи оферта (PDF или снимка)",type=["pdf","jpg","jpeg","png","webp"],key=f"offer_file_{r['id']}",disabled=not r["wants_parts"])  
+            if r.get("parts_offer_data") or r.get("parts_offer_file"):  
+                st.success(f"Има прикачена оферта: {r.get('parts_offer_name') or Path(r.get('parts_offer_file') or 'оферта').name}")  
+            note=st.text_area("Съобщение към клиента",value=r["admin_note"] or "",key=f"n_{r['id']}")  
+            pin=st.text_input("PIN",value=r["door_pin"] or "",key=f"pin_{r['id']}")  
+            try:  
+                existing_items=json.loads(r.get("offer_items_json") or "[]")  
+            except Exception:  
+                existing_items=[]  
+            st.markdown("#### Артикули от офертата")  
+            item_count=st.number_input("Брой артикули",min_value=1,max_value=30,value=max(1,len(existing_items)),step=1,key=f"item_count_{r['id']}",disabled=not r["wants_parts"])  
+            offer_items=[]  
+            for idx in range(int(item_count)):  
+                current=existing_items[idx] if idx < len(existing_items) else {}  
+                a1,a2,a3=st.columns([2,1,1])  
+                article=a1.text_input("Номер артикул",value=str(current.get("article", "")),key=f"article_{r['id']}_{idx}",disabled=not r["wants_parts"])  
+                qty=a2.number_input("Брой",min_value=1,max_value=999,value=int(current.get("qty",1) or 1),step=1,key=f"qty_{r['id']}_{idx}",disabled=not r["wants_parts"])  
+                price=a3.number_input("Цена/бр. (€)",min_value=0.0,max_value=100000.0,value=float(current.get("price",0) or 0),step=0.01,key=f"price_{r['id']}_{idx}",disabled=not r["wants_parts"])  
+                if article.strip() and price > 0: offer_items.append({"article":article.strip(),"qty":int(qty),"price":float(price)})  
+            offer_total=sum(x["qty"]*x["price"] for x in offer_items)  
+            st.markdown(f"### Максимална стойност на всички артикули: {offer_total:.2f} €")  
             if st.button("Запази промените",key=f"save_{r['id']}",use_container_width=True):
-                if ps=="Можем да подготвим" and not (offer.strip() or offer_upload or r.get("parts_offer_data") or r.get("parts_offer_file")): st.error("Добавете текст или PDF/снимка с офертата.")
+                if ps=="Можем да подготвим" and not (offer_upload or r.get("parts_offer_data") or r.get("parts_offer_file")): st.error("Качете PDF или снимка с офертата.")
+                elif ps=="Можем да подготвим" and not offer_items: st.error("Добавете поне един артикул с номер, брой и цена.")
                 else:
-                    
-                    if ns=="Завършена" and final_amount <= 0:
-                        st.error("Преди финализиране въведете крайна сума за плащане."); return
                     offer_file_path=r.get("parts_offer_file")
                     offer_data=r.get("parts_offer_data")
                     offer_name=r.get("parts_offer_name")
@@ -984,8 +994,8 @@ def admin_reservations():
                         offer_name=offer_upload.name
                         offer_mime=offer_upload.type or "application/octet-stream"
                         offer_file_path=None
-                    execute("UPDATE reservations SET status=%s,parts_status=%s,parts_offer=%s,parts_offer_file=%s,parts_offer_data=%s,parts_offer_name=%s,parts_offer_mime=%s,admin_note=%s,door_pin=%s,final_amount=%s WHERE id=%s",
-                            (ns,None if ps=="—" else ps,offer.strip() or None,offer_file_path,offer_data,offer_name,offer_mime,note.strip() or None,pin.strip() or None,final_amount if final_amount>0 else None,r["id"]))
+                    execute("UPDATE reservations SET status=%s,parts_status=%s,parts_offer=NULL,parts_offer_file=%s,parts_offer_data=%s,parts_offer_name=%s,parts_offer_mime=%s,admin_note=%s,door_pin=%s,offer_items_json=%s WHERE id=%s",
+                            (ns,None if ps=="—" else ps,offer_file_path,offer_data,offer_name,offer_mime,note.strip() or None,pin.strip() or None,json.dumps(offer_items,ensure_ascii=False),r["id"]))
                     st.session_state.admin_flash = (
                         f"Потвърдено: резервация #{r['id']} е обновена. "
                         f"Статус: {ns}. Статус части: {ps}."
@@ -1041,7 +1051,7 @@ def admin_finance():
     c1,c2,c3,c4=st.columns(4)
     c1.metric("Платени заявки",f"{float(paid):.2f} €"); c2.metric("Очаквани плащания",f"{float(due):.2f} €")
     c3.metric("Разходи",f"{float(spent):.2f} €"); c4.metric("Нетно",f"{float(paid)-float(spent):.2f} €")
-    st.caption("Плащанията с карта в момента са тестови и се отчитат като получени, без реална банкова транзакция.")
+    st.caption("Плащанията с карта са в тестов режим. Потвърдената от клиента сума на избраните артикули се отчита като получена, без реална банкова транзакция.")
     with st.form("garage_expense",clear_on_submit=True):
         d=st.date_input("Дата",date.today()); cat=st.selectbox("Категория",["Инструменти","Консумативи","Ток","Вода","Други"])
         amount=st.number_input("Сума (€)",min_value=0.0,max_value=100000.0,value=0.0,step=0.01); desc=st.text_area("Описание")
