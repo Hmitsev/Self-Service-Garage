@@ -235,17 +235,6 @@ def apply_style():
         box-shadow:0 8px 22px rgba(22,163,74,.38);
     }}
     </style>""", unsafe_allow_html=True)
-    if AUTODOC_LOGO.exists():
-        logo_b64 = base64.b64encode(AUTODOC_LOGO.read_bytes()).decode("utf-8")
-        st.markdown(f"""<style>
-        .st-key-client_nav_autodoc button {{
-            background-image: linear-gradient(135deg,rgba(114,0,0,.95),rgba(208,16,16,.95)), url(data:image/jpeg;base64,{logo_b64}) !important;
-            background-size: cover, 86px auto !important;
-            background-repeat: no-repeat !important;
-            background-position: center, 14px center !important;
-            padding-left: 92px !important;
-        }}
-        </style>""", unsafe_allow_html=True)
 
 def user_by_phone(phone):
     return fetchone("SELECT * FROM users WHERE phone=%s", (phone.strip(),))
@@ -545,8 +534,7 @@ def show_autodoc_logo(width=260):
 
 def autodoc_help():
     show_autodoc_logo(300)
-    st.markdown("## Помощ от AUTODOC")
-    st.caption("Изберете категория. Администраторът определя видеото, което се показва във всяка секция.")
+    st.caption("Изберете категория и вижте подходящото видео ръководство.")
     categories = [
         ("Смяна на масло", "help_oil"), ("Смяна на филтри", "help_filters"),
         ("Смяна на дискове и накладки", "help_brakes"), ("Ремонт по интериор", "help_interior"),
@@ -878,7 +866,7 @@ def client_panel():
 
     nav_items = [
         ("🏠 Начало", "Начало"),
-        ("Помощ от AUTODOC", "Помощ от AUTODOC"),
+        ("🔧 AUTODOC", "Помощ от AUTODOC"),
         ("📅 Запази час", "Запази час"),
         ("🧾 Моите резервации", "Моите резервации"),
         ("🛠 Технически проблем", "Технически проблем"),
