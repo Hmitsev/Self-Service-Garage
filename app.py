@@ -533,7 +533,7 @@ def show_autodoc_logo(width=260):
         st.markdown("### AUTODOC")
 
 def autodoc_help():
-    show_autodoc_logo(900)
+    show_autodoc_logo(750)
     st.caption("Изберете категория")
     categories = [
         ("Смяна на масло", "help_oil"), ("Смяна на филтри", "help_filters"),
