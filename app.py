@@ -173,6 +173,16 @@ def init_db():
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             read_at TIMESTAMPTZ
         )""",
+        "ALTER TABLE notifications ADD COLUMN IF NOT EXISTS recipient_role TEXT",
+        "ALTER TABLE notifications ADD COLUMN IF NOT EXISTS user_id BIGINT REFERENCES users(id) ON DELETE CASCADE",
+        "ALTER TABLE notifications ADD COLUMN IF NOT EXISTS title TEXT",
+        "ALTER TABLE notifications ADD COLUMN IF NOT EXISTS message TEXT",
+        "ALTER TABLE notifications ADD COLUMN IF NOT EXISTS target_page TEXT",
+        "ALTER TABLE notifications ADD COLUMN IF NOT EXISTS reservation_id BIGINT REFERENCES reservations(id) ON DELETE CASCADE",
+        "ALTER TABLE notifications ADD COLUMN IF NOT EXISTS is_read BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE notifications ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
+        "ALTER TABLE notifications ADD COLUMN IF NOT EXISTS read_at TIMESTAMPTZ",
+        "UPDATE notifications SET recipient_role=CASE WHEN user_id IS NULL THEN 'admin' ELSE 'client' END WHERE recipient_role IS NULL",
         "CREATE INDEX IF NOT EXISTS idx_notifications_client ON notifications(user_id,is_read,created_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_notifications_admin ON notifications(recipient_role,is_read,created_at DESC)",
     ]
@@ -1016,10 +1026,12 @@ def client_panel():
     if st.session_state.get("client_flash"):
         st.success(st.session_state.pop("client_flash"))
 
+    # Камбанката е видима във всяка секция на клиентския профил.
+    notification_center("client",user["id"])
+
     page = st.session_state.client_page
     st.markdown("---")
     if page == "Начало":
-        notification_center("client",user["id"])
         video_section()
     elif page == "Помощ от AUTODOC":
         autodoc_help()
@@ -1194,8 +1206,10 @@ def admin_panel():
     if st.session_state.get("admin_flash"):
         st.success(st.session_state.pop("admin_flash"))
 
+    # Камбанката е видима във всяка секция на Admin профила.
+    notification_center("admin")
+
     if page == "Табло":
-        notification_center("admin")
         pending = fetchone("SELECT COUNT(*) AS c FROM reservations WHERE status='Очаква потвърждение'")["c"]
         parts = fetchone("""SELECT COUNT(*) AS c FROM reservations
                           WHERE wants_parts=TRUE
